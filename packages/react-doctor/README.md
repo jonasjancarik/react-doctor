@@ -15,8 +15,6 @@ Works with Next.js, Vite, and React Native.
 
 ### [See it in action →](https://react.doctor)
 
-> **React Doctor vs React Review.** React Doctor is the local-first **CLI and lint plugins** in this repo: offline-friendly, scriptable, runs anywhere. React Review is the hosted product on [react.doctor](https://react.doctor) (GitHub App, dashboard, PR comments, baseline / delta tracking). They share the same rule set; pick the CLI when you want a one-shot scan or self-hosted CI, and add React Review when you also want a hosted dashboard and review team workflow. Already using the CLI? React Review augments it without replacing it.
-
 ## Install
 
 Run this at your project root:
@@ -26,8 +24,6 @@ npx react-doctor@latest
 ```
 
 You'll get a score (75+ Great, 50 to 74 Needs work, under 50 Critical) and a list of issues across state & effects, performance, architecture, security, and accessibility. Rules toggle automatically based on your framework and React version.
-
-> **Migration note:** React Doctor used to bundle [knip](https://knip.dev/) for dead-code detection. That integration was removed in v0.2 — if you want dead-code analysis, run `npx knip` directly as part of your own pre-commit or CI pipeline.
 
 https://github.com/user-attachments/assets/07cc88d9-9589-44c3-aa73-5d603cb1c570
 
