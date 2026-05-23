@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { RUN_COMMAND } from "@/constants";
 import { clampScore } from "@/utils/clamp-score";
 import { getDoctorFace } from "@/utils/get-doctor-face";
 import { getScoreColorClass } from "@/utils/get-score-color-class";
@@ -8,7 +9,6 @@ import BadgeSnippet from "./badge-snippet";
 
 const MAX_PROJECT_NAME_LENGTH = 100;
 const MAX_DISPLAY_COUNT = 99_999;
-const COMMAND = "npx react-doctor@latest";
 const SHARE_BASE_URL = "https://www.react.doctor/share";
 const X_ICON_PATH =
   "M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z";
@@ -47,7 +47,7 @@ export const generateMetadata = async ({
   searchParams: Promise<ShareSearchParams>;
 }): Promise<Metadata> => {
   const resolvedParams = await searchParams;
-  const projectName = clampProjectName(resolvedParams.p ?? null);
+  const projectName = clampProjectName(resolvedParams.p);
   const score = clampScore(Number(resolvedParams.s) || 0);
   const errorCount = clampDisplayCount(Number(resolvedParams.e) || 0);
   const warningCount = clampDisplayCount(Number(resolvedParams.w) || 0);
@@ -82,7 +82,7 @@ export const generateMetadata = async ({
 
 const SharePage = async ({ searchParams }: { searchParams: Promise<ShareSearchParams> }) => {
   const resolvedParams = await searchParams;
-  const projectName = clampProjectName(resolvedParams.p ?? null);
+  const projectName = clampProjectName(resolvedParams.p);
   const score = clampScore(Number(resolvedParams.s) || 0);
   const errorCount = clampDisplayCount(Number(resolvedParams.e) || 0);
   const warningCount = clampDisplayCount(Number(resolvedParams.w) || 0);
@@ -137,7 +137,7 @@ const SharePage = async ({ searchParams }: { searchParams: Promise<ShareSearchPa
 
       <div className="text-neutral-500">Run it on your codebase:</div>
       <div className="mt-2">
-        <span className="border border-white/20 px-3 py-1.5 text-white">{COMMAND}</span>
+        <span className="border border-white/20 px-3 py-1.5 text-white">{RUN_COMMAND}</span>
       </div>
 
       <div className="mt-8 flex flex-wrap items-center gap-3">

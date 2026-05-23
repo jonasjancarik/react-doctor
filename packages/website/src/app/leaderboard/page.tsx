@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-import { PERFECT_SCORE } from "@/constants";
+import { PERFECT_SCORE, RUN_COMMAND } from "@/constants";
 import { clampScore } from "@/utils/clamp-score";
 import { getDoctorFace } from "@/utils/get-doctor-face";
 import { getScoreColorClass } from "@/utils/get-score-color-class";
 
 const SCORE_BAR_WIDTH = 20;
 const REVALIDATE_SECONDS = 60 * 60;
-const COMMAND = "npx react-doctor@latest";
 const BENCHMARKS_REPO_URL = "https://github.com/millionco/react-doctor-benchmarks";
 const LEADERBOARD_URL =
   "https://raw.githubusercontent.com/millionco/react-doctor-benchmarks/main/results/leaderboard.json";
@@ -180,7 +179,7 @@ const LeaderboardPage = async () => {
 
       <div className="text-neutral-500">Run it on your codebase:</div>
       <div className="mt-2">
-        <span className="border border-white/20 px-3 py-1.5 text-white">{COMMAND}</span>
+        <span className="border border-white/20 px-3 py-1.5 text-white">{RUN_COMMAND}</span>
       </div>
 
       <div className="min-h-[1.4em]" />

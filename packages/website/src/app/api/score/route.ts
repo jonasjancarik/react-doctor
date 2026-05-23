@@ -92,8 +92,6 @@ const decodeRequestBody = async (request: Request): Promise<unknown> => {
 };
 
 export const POST = async (request: Request): Promise<Response> => {
-  // used for rate limiting bad actors
-  const ip = (request as any).ip || request.headers.get("x-forwarded-for") || "unknown";
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (contentLength > MAX_REQUEST_BODY_BYTES) {
     return respondError(413, "Request body exceeds 2MB");
@@ -132,8 +130,6 @@ export const POST = async (request: Request): Promise<Response> => {
   }
 
   const score = calculateScore(diagnostics as DiagnosticInput[]);
-
-  console.log({ ip, score }, diagnostics);
 
   return Response.json({ score, label: getScoreLabel(score) }, { headers: CORS_HEADERS });
 };
