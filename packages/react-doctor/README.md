@@ -83,6 +83,7 @@ Configuration, custom rules, standalone plugins, CLI reference, and API details 
 
 ## Contributing
 
-PRs and issues welcome — [issue tracker](https://github.com/millionco/react-doctor/issues). Local dev: `pnpm install && pnpm build`.
+
+[Issues are welcome!](https://github.com/millionco/react-doctor/issues)
 
 MIT-licensed.
