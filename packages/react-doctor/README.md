@@ -69,7 +69,10 @@ jobs:
           annotations: true
 ```
 
-`diff` keeps CI focused on files changed in the PR, `annotations` shows findings inline in GitHub's Files changed view, and `github-token` enables a sticky React Doctor PR comment with the score and scan output. Use `fail-on: warning` for a stricter gate, or `fail-on: none` while introducing React Doctor to an existing codebase.
+- `diff` keeps CI focused on files changed in the PR
+- `annotations` shows findings inline in GitHub's Files changed view
+- `github-token` enables a sticky React Doctor PR comment with the score and scan output
+- Use `fail-on: warning` for a stricter gate, or `fail-on: none` while introducing React Doctor to an existing codebase.
 
 ## Contributing
 
