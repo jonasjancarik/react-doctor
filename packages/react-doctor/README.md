@@ -13,7 +13,7 @@ React Doctor deterministically scans your codebase and finds issues across state
 
 Works for all React frameworks and libraries - Next.js, Vite, TanStack, React Native, Expo, you name it.
 
-### [View demo →](https://react.doctor)
+### [Website](https://react.doctor) | [Docs](https://react.doctor/docs)
 
 ## Install
 
@@ -75,14 +75,7 @@ jobs:
 
 `diff` keeps CI focused on files changed in the PR, `annotations` shows findings inline in GitHub's Files changed view, and `github-token` enables a sticky React Doctor PR comment with the score and scan output. Use `fail-on: warning` for a stricter gate, or `fail-on: none` while introducing React Doctor to an existing codebase.
 
-## Docs
-
-Configuration, custom rules, standalone plugins, CLI reference, and API details live in the docs:
-
-### [View docs →](https://react.doctor/docs)
-
 ## Contributing
-
 
 [Issues are welcome!](https://github.com/millionco/react-doctor/issues)
 
