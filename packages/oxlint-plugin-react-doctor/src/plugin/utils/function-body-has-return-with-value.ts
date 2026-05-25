@@ -1,11 +1,6 @@
+import { FUNCTION_LIKE_TYPES } from "../constants/js.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { isAstNode } from "./is-ast-node.js";
-
-const NESTED_FUNCTION_TYPES = new Set<string>([
-  "FunctionDeclaration",
-  "FunctionExpression",
-  "ArrowFunctionExpression",
-]);
 
 // Visitor-based approximation of "the function body contains a non-empty
 // `return X` somewhere reachable". We don't have a CFG, so instead we
@@ -35,12 +30,12 @@ export const functionBodyHasReturnWithValue = (functionNode: EsTreeNode): boolea
       if (Array.isArray(child)) {
         for (const item of child) {
           if (!isAstNode(item)) continue;
-          if (NESTED_FUNCTION_TYPES.has(item.type)) continue;
+          if (FUNCTION_LIKE_TYPES.has(item.type)) continue;
           visit(item);
           if (didFindReturn) return;
         }
       } else if (isAstNode(child)) {
-        if (NESTED_FUNCTION_TYPES.has(child.type)) continue;
+        if (FUNCTION_LIKE_TYPES.has(child.type)) continue;
         visit(child);
       }
     }
