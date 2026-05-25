@@ -33,6 +33,8 @@ export interface InspectInput {
   readonly runDeadCode: boolean;
   /** Marks the run as CI-originated for the Score API. */
   readonly isCi: boolean;
+  /** react-doctor release version sent with score requests. */
+  readonly doctorVersion?: string;
 }
 
 export interface InspectOutput {
@@ -177,6 +179,7 @@ export const runInspect = <HooksR = never>(
       ...(project.reactVersion !== null ? { reactVersion: project.reactVersion } : {}),
       sourceFileCount: project.sourceFileCount,
       ...(defaultBranch !== null ? { defaultBranch } : {}),
+      ...(input.doctorVersion !== undefined ? { doctorVersion: input.doctorVersion } : {}),
     };
 
     const jsxIncludePaths = computeJsxIncludePaths([...input.includePaths]);

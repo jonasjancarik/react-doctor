@@ -36,6 +36,7 @@ export interface ScoreRequestMetadata {
   reactVersion?: string;
   sourceFileCount?: number;
   defaultBranch?: string;
+  doctorVersion?: string;
 }
 
 export const calculateScore = async (
@@ -57,6 +58,7 @@ export const calculateScore = async (
         ? { sourceFileCount: options.metadata.sourceFileCount }
         : {}),
       ...(options.metadata?.defaultBranch ? { defaultBranch: options.metadata.defaultBranch } : {}),
+      ...(options.metadata?.doctorVersion ? { doctorVersion: options.metadata.doctorVersion } : {}),
     });
     const compressedBody = gzipSync(requestBody);
 

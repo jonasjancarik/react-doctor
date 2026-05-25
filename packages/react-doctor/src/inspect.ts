@@ -38,6 +38,7 @@ import {
 import { printSummary } from "./cli/utils/render-summary.js";
 import { resolveOxlintNode } from "./cli/utils/resolve-oxlint-node.js";
 import { isSpinnerSilent, setSpinnerSilent, spinner } from "./cli/utils/spinner.js";
+import { VERSION } from "./cli/utils/version.js";
 
 // HACK: console object whose methods are no-ops. Provided via
 // `Effect.provideService(Console.Console, silentConsole)` to suppress
@@ -239,6 +240,7 @@ const runInspectWithRuntime = async (
         nodeBinaryPath: resolvedNodeBinaryPath ?? undefined,
         runDeadCode: options.deadCode,
         isCi: options.isCi,
+        doctorVersion: VERSION,
       },
       {
         beforeLint: (projectInfo, lintIncludePaths) =>

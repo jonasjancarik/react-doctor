@@ -73,6 +73,7 @@ describe("calculateScore", () => {
         reactVersion: "19.2.0",
         sourceFileCount: 42,
         defaultBranch: "main",
+        doctorVersion: "0.2.5",
       },
     });
 
@@ -98,6 +99,7 @@ describe("calculateScore", () => {
       reactVersion: "19.2.0",
       sourceFileCount: 42,
       defaultBranch: "main",
+      doctorVersion: "0.2.5",
     });
   });
 
