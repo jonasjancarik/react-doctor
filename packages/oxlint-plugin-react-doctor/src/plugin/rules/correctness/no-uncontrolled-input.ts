@@ -150,8 +150,7 @@ export const noUncontrolledInput = defineRule<Rule>({
       },
       VariableDeclarator(node: EsTreeNodeOfType<"VariableDeclarator">) {
         if (!isComponentAssignment(node)) return;
-        if (!isInlineFunctionExpression(node.init))
-          return;
+        if (!isInlineFunctionExpression(node.init)) return;
         checkComponent(node.init.body);
       },
     };

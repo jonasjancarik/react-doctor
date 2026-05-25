@@ -17,11 +17,8 @@ import { isNodeOfType } from "./is-node-of-type.js";
  */
 export const isInlineFunctionExpression = (
   node: EsTreeNode | null | undefined,
-): node is
-  | EsTreeNodeOfType<"ArrowFunctionExpression">
-  | EsTreeNodeOfType<"FunctionExpression"> =>
+): node is EsTreeNodeOfType<"ArrowFunctionExpression"> | EsTreeNodeOfType<"FunctionExpression"> =>
   Boolean(
     node &&
-      (isNodeOfType(node, "ArrowFunctionExpression") ||
-        isNodeOfType(node, "FunctionExpression")),
+    (isNodeOfType(node, "ArrowFunctionExpression") || isNodeOfType(node, "FunctionExpression")),
   );

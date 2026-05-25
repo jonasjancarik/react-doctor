@@ -83,9 +83,7 @@ export const reactCompilerDestructureMethod = defineRule<Rule>({
         body = node.body;
       } else if (isNodeOfType(node, "VariableDeclarator")) {
         const initializer = node.init;
-        body = isInlineFunctionExpression(initializer)
-          ? initializer.body
-            : null;
+        body = isInlineFunctionExpression(initializer) ? initializer.body : null;
       }
       hookBindingMapStack.push(buildHookBindingMap(body));
     };

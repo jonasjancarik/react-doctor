@@ -102,8 +102,7 @@ export const noPreventDefault = defineRule<Rule>({
             continue;
 
           const expression = eventAttribute.value.expression;
-          if (!isInlineFunctionExpression(expression))
-            continue;
+          if (!isInlineFunctionExpression(expression)) continue;
 
           if (!containsPreventDefaultCall(expression)) continue;
 

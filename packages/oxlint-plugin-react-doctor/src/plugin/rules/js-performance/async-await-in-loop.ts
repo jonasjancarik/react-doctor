@@ -79,7 +79,8 @@ const collectPatternIdentifiers = (pattern: EsTreeNode, target: Set<string>): vo
 const collectAssignedIdentifiers = (block: EsTreeNode): Set<string> => {
   const assigned = new Set<string>();
   walkAst(block, (child: EsTreeNode): boolean | void => {
-    if (isInlineFunctionExpression(child) || isNodeOfType(child, "FunctionDeclaration")) return false;
+    if (isInlineFunctionExpression(child) || isNodeOfType(child, "FunctionDeclaration"))
+      return false;
     if (isNodeOfType(child, "AssignmentExpression") && child.left) {
       collectPatternIdentifiers(child.left, assigned);
     }
@@ -90,7 +91,8 @@ const collectAssignedIdentifiers = (block: EsTreeNode): Set<string> => {
 const collectAwaitedArgIdentifiers = (block: EsTreeNode): Set<string> => {
   const referenced = new Set<string>();
   walkAst(block, (child: EsTreeNode): boolean | void => {
-    if (isInlineFunctionExpression(child) || isNodeOfType(child, "FunctionDeclaration")) return false;
+    if (isInlineFunctionExpression(child) || isNodeOfType(child, "FunctionDeclaration"))
+      return false;
     if (!isNodeOfType(child, "AwaitExpression") || !child.argument) return;
     walkAst(child.argument, (innerChild: EsTreeNode) => {
       if (isNodeOfType(innerChild, "Identifier")) referenced.add(innerChild.name);
@@ -122,7 +124,8 @@ const loopBodyHasOnlySleepLikeAwaits = (block: EsTreeNode): boolean => {
   let allAreSleepLike = true;
   let foundAny = false;
   walkAst(block, (child: EsTreeNode): boolean | void => {
-    if (isInlineFunctionExpression(child) || isNodeOfType(child, "FunctionDeclaration")) return false;
+    if (isInlineFunctionExpression(child) || isNodeOfType(child, "FunctionDeclaration"))
+      return false;
     if (isNodeOfType(child, "AwaitExpression")) {
       foundAny = true;
       if (!isAwaitingSleepLikeCall(child)) allAreSleepLike = false;

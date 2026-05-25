@@ -33,8 +33,7 @@ export const nextjsAsyncClientComponent = defineRule<Rule>({
       VariableDeclarator(node: EsTreeNodeOfType<"VariableDeclarator">) {
         if (!fileHasUseClient) return;
         if (!isComponentAssignment(node)) return;
-        if (!isInlineFunctionExpression(node.init))
-          return;
+        if (!isInlineFunctionExpression(node.init)) return;
         if (!node.init.async) return;
         if (!isNodeOfType(node.id, "Identifier")) return;
         context.report({
