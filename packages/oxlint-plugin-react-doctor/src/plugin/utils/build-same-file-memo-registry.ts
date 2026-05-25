@@ -1,3 +1,4 @@
+import { REACT_HOC_NAMES } from "../constants/react.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 
@@ -9,11 +10,13 @@ import { isNodeOfType } from "./is-node-of-type.js";
 // that premise doesn't hold — the parent re-renders unconditionally.
 export type MemoStatus = "memoised" | "not-memoised" | "unknown";
 
+// Extends `REACT_HOC_NAMES` (the React-native pair {memo, forwardRef,
+// React.memo, React.forwardRef}) with the third-party wrappers that
+// produce memoised output: MobX `observer`, legend-state `observable`,
+// React.lazy, and the `withTracking` HOC. Adding a new React-side HOC
+// to `REACT_HOC_NAMES` automatically extends this set too.
 const HOC_NAMES_FOR_MEMOISATION: ReadonlySet<string> = new Set([
-  "memo",
-  "React.memo",
-  "forwardRef",
-  "React.forwardRef",
+  ...REACT_HOC_NAMES,
   "observer", // MobX
   "observable", // legend-state
   "lazy",
