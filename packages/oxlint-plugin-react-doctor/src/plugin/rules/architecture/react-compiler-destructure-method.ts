@@ -1,5 +1,6 @@
 import { defineRule } from "../../utils/define-rule.js";
 import { isComponentAssignment } from "../../utils/is-component-assignment.js";
+import { isInlineFunctionExpression } from "../../utils/is-inline-function-expression.js";
 import { isUppercaseName } from "../../utils/is-uppercase-name.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
 import type { Rule } from "../../utils/rule.js";
@@ -82,10 +83,8 @@ export const reactCompilerDestructureMethod = defineRule<Rule>({
         body = node.body;
       } else if (isNodeOfType(node, "VariableDeclarator")) {
         const initializer = node.init;
-        body =
-          isNodeOfType(initializer, "ArrowFunctionExpression") ||
-          isNodeOfType(initializer, "FunctionExpression")
-            ? initializer.body
+        body = isInlineFunctionExpression(initializer)
+          ? initializer.body
             : null;
       }
       hookBindingMapStack.push(buildHookBindingMap(body));

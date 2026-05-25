@@ -1,6 +1,7 @@
 import { areExpressionsStructurallyEqual } from "../../utils/are-expressions-structurally-equal.js";
 import { collectEarlierAndGuardOperands } from "../../utils/collect-earlier-and-guard-operands.js";
 import { defineRule } from "../../utils/define-rule.js";
+import { isInlineFunctionExpression } from "../../utils/is-inline-function-expression.js";
 import { isMemberProperty } from "../../utils/is-member-property.js";
 import { walkAst } from "../../utils/walk-ast.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
@@ -73,10 +74,7 @@ export const jsLengthCheckFirst = defineRule<Rule>({
       if (node.callee.property.name !== "every") return;
 
       const callback = node.arguments?.[0];
-      if (
-        !isNodeOfType(callback, "ArrowFunctionExpression") &&
-        !isNodeOfType(callback, "FunctionExpression")
-      ) {
+      if (!isInlineFunctionExpression(callback)) {
         return;
       }
       const callbackParameters = callback.params ?? [];

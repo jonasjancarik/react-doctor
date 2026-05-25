@@ -2,6 +2,7 @@ import { defineRule } from "../../utils/define-rule.js";
 import { findJsxAttribute } from "../../utils/find-jsx-attribute.js";
 import { isComponentAssignment } from "../../utils/is-component-assignment.js";
 import { isHookCall } from "../../utils/is-hook-call.js";
+import { isInlineFunctionExpression } from "../../utils/is-inline-function-expression.js";
 import { isUppercaseName } from "../../utils/is-uppercase-name.js";
 import { walkAst } from "../../utils/walk-ast.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
@@ -149,10 +150,7 @@ export const noUncontrolledInput = defineRule<Rule>({
       },
       VariableDeclarator(node: EsTreeNodeOfType<"VariableDeclarator">) {
         if (!isComponentAssignment(node)) return;
-        if (
-          !isNodeOfType(node.init, "ArrowFunctionExpression") &&
-          !isNodeOfType(node.init, "FunctionExpression")
-        )
+        if (!isInlineFunctionExpression(node.init))
           return;
         checkComponent(node.init.body);
       },

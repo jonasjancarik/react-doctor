@@ -2,6 +2,7 @@ import { BOOLEAN_PROP_THRESHOLD } from "../../constants/thresholds.js";
 import { defineRule } from "../../utils/define-rule.js";
 import { isComponentAssignment } from "../../utils/is-component-assignment.js";
 import { isComponentDeclaration } from "../../utils/is-component-declaration.js";
+import { isInlineFunctionExpression } from "../../utils/is-inline-function-expression.js";
 import { walkAst } from "../../utils/walk-ast.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
 import type { Rule } from "../../utils/rule.js";
@@ -91,11 +92,7 @@ export const noManyBooleanProps = defineRule<Rule>({
       VariableDeclarator(node: EsTreeNodeOfType<"VariableDeclarator">) {
         if (!isComponentAssignment(node)) return;
         if (!isNodeOfType(node.id, "Identifier")) return;
-        if (
-          !isNodeOfType(node.init, "ArrowFunctionExpression") &&
-          !isNodeOfType(node.init, "FunctionExpression")
-        )
-          return;
+        if (!isInlineFunctionExpression(node.init)) return;
         checkComponent(node.init.params?.[0], node.init.body, node.id.name, node.id);
       },
     };

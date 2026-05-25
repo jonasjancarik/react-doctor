@@ -1,6 +1,7 @@
 import { defineRule } from "../../utils/define-rule.js";
 import { findJsxAttribute } from "../../utils/find-jsx-attribute.js";
 import { getReactDoctorStringSetting } from "../../utils/get-react-doctor-setting.js";
+import { isInlineFunctionExpression } from "../../utils/is-inline-function-expression.js";
 import { walkAst } from "../../utils/walk-ast.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
 import type { Rule } from "../../utils/rule.js";
@@ -101,10 +102,7 @@ export const noPreventDefault = defineRule<Rule>({
             continue;
 
           const expression = eventAttribute.value.expression;
-          if (
-            !isNodeOfType(expression, "ArrowFunctionExpression") &&
-            !isNodeOfType(expression, "FunctionExpression")
-          )
+          if (!isInlineFunctionExpression(expression))
             continue;
 
           if (!containsPreventDefaultCall(expression)) continue;

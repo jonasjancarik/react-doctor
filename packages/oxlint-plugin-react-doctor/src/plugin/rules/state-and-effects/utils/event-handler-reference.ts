@@ -1,15 +1,10 @@
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
+import { isInlineFunctionExpression } from "../../../utils/is-inline-function-expression.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 
-// Recognises an inline function expression as the value of a JSX
-// prop or callback argument — `onClick={() => ...}` or
-// `onClick={function() {}}`. Differs from `utils/is-function-like.ts`
-// (the canonical helper) which also matches `FunctionDeclaration`;
-// declarations never appear as expression values, so omitting them
-// here is intentional. Renamed away from `isFunctionLike` to avoid
-// confusion with the canonical helper.
-export const isInlineFunctionExpression = (node: EsTreeNode): boolean =>
-  isNodeOfType(node, "FunctionExpression") || isNodeOfType(node, "ArrowFunctionExpression");
+// Re-exported so existing consumers in this directory keep the same
+// import path without churn.
+export { isInlineFunctionExpression };
 
 export const isEventHandlerName = (name: string): boolean => /^on[A-Z]/.test(name);
 

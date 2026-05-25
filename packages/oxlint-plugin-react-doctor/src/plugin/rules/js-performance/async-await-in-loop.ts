@@ -3,6 +3,7 @@ import { defineRule } from "../../utils/define-rule.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../utils/es-tree-node-of-type.js";
 import { isFunctionLike } from "../../utils/is-function-like.js";
+import { isInlineFunctionExpression } from "../../utils/is-inline-function-expression.js";
 import { isNodeOfType } from "../../utils/is-node-of-type.js";
 import type { Rule } from "../../utils/rule.js";
 import type { RuleContext } from "../../utils/rule-context.js";
@@ -75,15 +76,10 @@ const collectPatternIdentifiers = (pattern: EsTreeNode, target: Set<string>): vo
   }
 };
 
-const isFunctionishExpression = (
-  node: EsTreeNode,
-): node is EsTreeNodeOfType<"ArrowFunctionExpression"> | EsTreeNodeOfType<"FunctionExpression"> =>
-  isNodeOfType(node, "ArrowFunctionExpression") || isNodeOfType(node, "FunctionExpression");
-
 const collectAssignedIdentifiers = (block: EsTreeNode): Set<string> => {
   const assigned = new Set<string>();
   walkAst(block, (child: EsTreeNode): boolean | void => {
-    if (isFunctionishExpression(child) || isNodeOfType(child, "FunctionDeclaration")) return false;
+    if (isInlineFunctionExpression(child) || isNodeOfType(child, "FunctionDeclaration")) return false;
     if (isNodeOfType(child, "AssignmentExpression") && child.left) {
       collectPatternIdentifiers(child.left, assigned);
     }
@@ -94,7 +90,7 @@ const collectAssignedIdentifiers = (block: EsTreeNode): Set<string> => {
 const collectAwaitedArgIdentifiers = (block: EsTreeNode): Set<string> => {
   const referenced = new Set<string>();
   walkAst(block, (child: EsTreeNode): boolean | void => {
-    if (isFunctionishExpression(child) || isNodeOfType(child, "FunctionDeclaration")) return false;
+    if (isInlineFunctionExpression(child) || isNodeOfType(child, "FunctionDeclaration")) return false;
     if (!isNodeOfType(child, "AwaitExpression") || !child.argument) return;
     walkAst(child.argument, (innerChild: EsTreeNode) => {
       if (isNodeOfType(innerChild, "Identifier")) referenced.add(innerChild.name);
@@ -126,7 +122,7 @@ const loopBodyHasOnlySleepLikeAwaits = (block: EsTreeNode): boolean => {
   let allAreSleepLike = true;
   let foundAny = false;
   walkAst(block, (child: EsTreeNode): boolean | void => {
-    if (isFunctionishExpression(child) || isNodeOfType(child, "FunctionDeclaration")) return false;
+    if (isInlineFunctionExpression(child) || isNodeOfType(child, "FunctionDeclaration")) return false;
     if (isNodeOfType(child, "AwaitExpression")) {
       foundAny = true;
       if (!isAwaitingSleepLikeCall(child)) allAreSleepLike = false;
@@ -217,7 +213,7 @@ export const asyncAwaitInLoop = defineRule<Rule>({
         if (!ITERATION_METHOD_NAMES_WITH_CALLBACK.has(methodName)) return;
 
         const callback = node.arguments?.[0];
-        if (!callback || !isFunctionishExpression(callback)) return;
+        if (!callback || !isInlineFunctionExpression(callback)) return;
         if (!callback.async) return;
         const body = callback.body;
         if (!body) return;

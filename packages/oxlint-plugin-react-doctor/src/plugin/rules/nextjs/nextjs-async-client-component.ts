@@ -1,6 +1,7 @@
 import { defineRule } from "../../utils/define-rule.js";
 import { hasDirective } from "../../utils/has-directive.js";
 import { isComponentAssignment } from "../../utils/is-component-assignment.js";
+import { isInlineFunctionExpression } from "../../utils/is-inline-function-expression.js";
 import { isNodeOfType } from "../../utils/is-node-of-type.js";
 import { isUppercaseName } from "../../utils/is-uppercase-name.js";
 import type { Rule } from "../../utils/rule.js";
@@ -32,10 +33,7 @@ export const nextjsAsyncClientComponent = defineRule<Rule>({
       VariableDeclarator(node: EsTreeNodeOfType<"VariableDeclarator">) {
         if (!fileHasUseClient) return;
         if (!isComponentAssignment(node)) return;
-        if (
-          !isNodeOfType(node.init, "ArrowFunctionExpression") &&
-          !isNodeOfType(node.init, "FunctionExpression")
-        )
+        if (!isInlineFunctionExpression(node.init))
           return;
         if (!node.init.async) return;
         if (!isNodeOfType(node.id, "Identifier")) return;
