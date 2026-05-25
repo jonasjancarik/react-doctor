@@ -41,14 +41,21 @@ describe("GitHub Action contract", () => {
     const actionYaml = readActionYaml();
     const outputsBlock = extractBlock(actionYaml, "outputs:", "\nruns:");
     const inputsBlock = extractBlock(actionYaml, "inputs:", "\noutputs:");
+    const scanStep = normalizeWhitespace(
+      extractStep(actionYaml, "INPUT_FAIL_ON: ${{ inputs.fail-on }}"),
+    );
     const scoreStep = normalizeWhitespace(extractStep(actionYaml, "- id: score"));
 
     expect(inputsBlock).toContain("  no-score:");
+    expect(inputsBlock).toContain('    default: "false"');
     expect(inputsBlock).not.toContain("  offline:");
     expect(outputsBlock).toContain("${{ steps.score.outputs.score }}");
+    expect(scanStep).toContain(
+      'if [ "${INPUT_NO_SCORE:-false}" = "true" ]; then FLAGS+=("--no-score"); fi',
+    );
     expect(scoreStep).toContain("INPUT_NO_SCORE: ${{ inputs.no-score }}");
     expect(scoreStep).not.toContain("INPUT_OFFLINE");
-    expect(scoreStep).toContain('if [ "$INPUT_NO_SCORE" = "true" ]; then exit 0; fi');
+    expect(scoreStep).toContain('if [ "${INPUT_NO_SCORE:-false}" = "true" ]; then exit 0; fi');
   });
 
   it("issue #188 + #61: action exposes CI inputs used by the scan step", () => {

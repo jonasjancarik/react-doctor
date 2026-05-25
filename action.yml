@@ -75,7 +75,7 @@ runs:
         if [ "$INPUT_VERBOSE" = "true" ]; then FLAGS+=("--verbose"); fi
         if [ -n "$INPUT_PROJECT" ]; then FLAGS+=("--project" "$INPUT_PROJECT"); fi
         if [ -n "$INPUT_DIFF" ]; then FLAGS+=("--diff" "$INPUT_DIFF"); fi
-        if [ "$INPUT_NO_SCORE" = "true" ]; then FLAGS+=("--no-score"); fi
+        if [ "${INPUT_NO_SCORE:-false}" = "true" ]; then FLAGS+=("--no-score"); fi
         if [ "$INPUT_ANNOTATIONS" = "true" ]; then FLAGS+=("--annotations"); fi
 
         OUTPUT_FILE="${RUNNER_TEMP:-/tmp}/react-doctor-output-${GITHUB_RUN_ID:-$$}.txt"
@@ -113,7 +113,7 @@ runs:
         # non-zero when the score lands in the "Needs work" band, even
         # though the value itself is the only meaningful signal here)
         # don't fail the composite action under `set -e -o pipefail`.
-        if [ "$INPUT_NO_SCORE" = "true" ]; then exit 0; fi
+        if [ "${INPUT_NO_SCORE:-false}" = "true" ]; then exit 0; fi
         SCORE_ARGS=("$INPUT_DIRECTORY" "--score" "--fail-on" "none")
         SCORE=$(npx react-doctor@latest "${SCORE_ARGS[@]}" 2>/dev/null | tail -1 | tr -d '[:space:]') || true
         if [[ -n "$SCORE" && "$SCORE" =~ ^[0-9]+$ ]]; then
