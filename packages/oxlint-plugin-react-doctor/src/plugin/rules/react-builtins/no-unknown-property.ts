@@ -10,7 +10,7 @@ import { defineRule } from "../../utils/define-rule.js";
 import type { EsTreeNodeOfType } from "../../utils/es-tree-node-of-type.js";
 import { getJsxAttributeName } from "../../utils/get-jsx-attribute-name.js";
 import { isNodeOfType } from "../../utils/is-node-of-type.js";
-import { NON_REACT_JSX_DIALECT_PACKAGES } from "../../utils/non-react-jsx-dialect.js";
+import { fileImportsNonReactJsxDialect } from "../../utils/non-react-jsx-dialect.js";
 import type { Rule } from "../../utils/rule.js";
 
 interface NoUnknownPropertySettings {
@@ -77,27 +77,6 @@ const UNKNOWN_PROP_GENERIC = "Unknown property — remove it.";
 // Non-React JSX dialect detection — see
 // `utils/non-react-jsx-dialect.ts` for the canonical package list +
 // the import / attribute markers we recognise.
-
-const startsWithAny = (source: string, prefixes: ReadonlyArray<string>): boolean =>
-  prefixes.some((prefix) => source === prefix || source.startsWith(`${prefix}/`));
-
-const fileImportsNonReactJsxDialect = (program: EsTreeNodeOfType<"Program">): boolean => {
-  for (const statement of program.body) {
-    if (!isNodeOfType(statement as EsTreeNodeOfType<"ImportDeclaration">, "ImportDeclaration")) {
-      continue;
-    }
-    const source = (statement as EsTreeNodeOfType<"ImportDeclaration">).source;
-    const value =
-      source && typeof (source as { value?: unknown }).value === "string"
-        ? (source as { value: string }).value
-        : null;
-    if (!value) continue;
-    if (NON_REACT_JSX_DIALECT_PACKAGES.has(value)) return true;
-    // Also catch deep imports like `solid-js/web/...`.
-    if (startsWithAny(value, ["solid-js", "@builder.io/qwik"])) return true;
-  }
-  return false;
-};
 
 export const noUnknownProperty = defineRule<Rule>({
   id: "no-unknown-property",
