@@ -32,4 +32,13 @@ describe("stripUnknownCliFlags", () => {
       "--agent-hooks",
     ]);
   });
+
+  it("keeps a trailing optional-value flag without pushing undefined", () => {
+    expect(stripUserArguments(["--diff"])).toEqual(["--diff"]);
+    expect(stripUserArguments([".", "--diff"])).toEqual([".", "--diff"]);
+  });
+
+  it("keeps an optional-value flag followed by another flag", () => {
+    expect(stripUserArguments(["--diff", "--json"])).toEqual(["--diff", "--json"]);
+  });
 });

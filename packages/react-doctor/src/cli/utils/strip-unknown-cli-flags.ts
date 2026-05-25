@@ -67,7 +67,9 @@ const shouldConsumeNextArgument = (
     if (hasInlineOptionValue(argument)) return false;
     if (flagSpec.longOptionsWithRequiredValues.has(optionName)) return nextArgument !== undefined;
     return (
-      flagSpec.longOptionsWithOptionalValues.has(optionName) && !isFlagLike(nextArgument ?? "")
+      flagSpec.longOptionsWithOptionalValues.has(optionName) &&
+      nextArgument !== undefined &&
+      !isFlagLike(nextArgument)
     );
   }
   return flagSpec.shortOptionsWithRequiredValues.has(argument) && nextArgument !== undefined;
