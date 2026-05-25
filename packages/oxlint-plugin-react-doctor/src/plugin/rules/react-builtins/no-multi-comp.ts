@@ -9,6 +9,7 @@ import { isReactComponentName } from "../../utils/is-react-component-name.js";
 import { isTestlikeFilename } from "../../utils/is-testlike-filename.js";
 import type { Rule } from "../../utils/rule.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../../semantic/scope-analysis.js";
+import { flattenCalleeName } from "../../utils/flatten-callee-name.js";
 import { stripParenExpression } from "../../utils/strip-paren-expression.js";
 import { REACT_HOC_NAMES } from "../../constants/react.js";
 
@@ -28,18 +29,6 @@ const resolveSettings = (
       ? ((reactDoctor as { noMultiComp?: NoMultiCompSettings }).noMultiComp ?? {})
       : {};
   return { ignoreStateless: ruleSettings.ignoreStateless ?? false };
-};
-
-const flattenCalleeName = (callee: EsTreeNode): string | null => {
-  if (isNodeOfType(callee, "Identifier")) return callee.name;
-  if (isNodeOfType(callee, "MemberExpression")) {
-    const obj = flattenCalleeName(callee.object);
-    if (!obj) return null;
-    if (isNodeOfType(callee.property, "Identifier") && !callee.computed) {
-      return `${obj}.${callee.property.name}`;
-    }
-  }
-  return null;
 };
 
 // Returns true when the callee name resolves (directly or through a
