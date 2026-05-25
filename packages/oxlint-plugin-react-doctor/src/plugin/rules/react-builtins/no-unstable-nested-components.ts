@@ -4,6 +4,7 @@ import type { EsTreeNode } from "../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../utils/es-tree-node-of-type.js";
 import { isAstNode } from "../../utils/is-ast-node.js";
 import { isCreateElementCall } from "../../utils/is-create-element-call.js";
+import { isFunctionLike } from "../../utils/is-function-like.js";
 import { isNodeOfType } from "../../utils/is-node-of-type.js";
 import { isReactComponentName } from "../../utils/is-react-component-name.js";
 import type { Rule } from "../../utils/rule.js";
@@ -135,11 +136,7 @@ const findEnclosingComponent = (
 ): { component: EsTreeNode; name: string | null } | null => {
   let walker: EsTreeNode | null | undefined = node.parent;
   while (walker) {
-    if (
-      isNodeOfType(walker, "FunctionDeclaration") ||
-      isNodeOfType(walker, "FunctionExpression") ||
-      isNodeOfType(walker, "ArrowFunctionExpression")
-    ) {
+    if (isFunctionLike(walker)) {
       const componentName = inferFunctionLikeName(walker);
       if (
         componentName &&
