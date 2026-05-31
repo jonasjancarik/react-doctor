@@ -9,6 +9,7 @@ import {
   MILLISECONDS_PER_SECOND,
 } from "./constants.js";
 import { readIgnoreFile } from "./read-ignore-file.js";
+import { toCanonicalPath } from "./utils/to-canonical-path.js";
 import { toRelativePath } from "./utils/to-relative-path.js";
 
 // The plugin id and category every dead-code diagnostic carries.
@@ -440,7 +441,10 @@ const runDeadCodeWorkerWithTimeout = (
   });
 
 export const checkDeadCode = async (options: CheckDeadCodeOptions): Promise<Diagnostic[]> => {
-  const { rootDirectory, userConfig } = options;
+  const { userConfig } = options;
+  // Canonicalize up front so the deslop graph and its resolver share one
+  // path space (see `toCanonicalPath` for why a symlinked root breaks it).
+  const rootDirectory = toCanonicalPath(options.rootDirectory);
   if (!fs.existsSync(path.join(rootDirectory, "package.json"))) return [];
 
   const ignorePatterns = collectDeadCodeIgnorePatterns(rootDirectory, userConfig);
