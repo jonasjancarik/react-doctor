@@ -21,7 +21,8 @@ import type {
   ReactDoctorConfig,
 } from "@react-doctor/core";
 import { cliLogger as logger } from "../utils/cli-logger.js";
-import { STAGED_FILES_TEMP_DIR_PREFIX } from "../utils/constants.js";
+import { METRIC, STAGED_FILES_TEMP_DIR_PREFIX } from "../utils/constants.js";
+import { recordCount } from "../utils/record-metric.js";
 import { getStagedSourceFiles, materializeStagedFiles } from "../utils/get-staged-files.js";
 import type { InspectFlags } from "../utils/inspect-flags.js";
 import { handleError } from "../utils/handle-error.js";
@@ -167,6 +168,9 @@ export const inspectAction = async (directory: string, flags: InspectFlags): Pro
   if (isJsonMode) {
     enableJsonMode({ compact: Boolean(flags.jsonCompact), directory: requestedDirectory });
   }
+  // Recorded after JSON mode is enabled so the metric's run attributes reflect
+  // the true `jsonMode` (run context is rebuilt per emit in `record-metric.ts`).
+  recordCount(METRIC.cliInvoked, 1, { command: "inspect" });
 
   try {
     validateModeFlags(flags);
@@ -413,6 +417,7 @@ export const inspectAction = async (directory: string, flags: InspectFlags): Pro
         })
       ) {
         printAgentInstallHint();
+        recordCount(METRIC.agentInstallHintShown, 1);
       }
     }
   } catch (error) {

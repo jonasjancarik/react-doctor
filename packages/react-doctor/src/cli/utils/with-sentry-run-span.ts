@@ -74,4 +74,8 @@ export const recordSentryProjectContext = (
 ): void => {
   setSentryProjectInfo(projectInfo);
   rootSpan?.setAttributes(toSpanAttributes(buildSentryProjectContext(projectInfo).tags));
+  // Metrics emitted after discovery (`project.detected`, `scan.completed`,
+  // `rule.fired`, ...) pick the project shape up via `getSentryProjectInfo()`
+  // when `record-metric.ts` rebuilds the scope per emit — so it also clears
+  // correctly on `resetSentryRunState`, exactly like event tags do.
 };
