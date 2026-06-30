@@ -10,6 +10,7 @@ import { hasDirective } from "../../utils/has-directive.js";
 import { hasUseServerDirective } from "../../utils/has-use-server-directive.js";
 import { isAuthGuardName } from "../../utils/is-auth-guard-name.js";
 import { isFunctionLike } from "../../utils/is-function-like.js";
+import { isNonPrivilegedServerAction } from "../../utils/is-non-privileged-server-action.js";
 import { walkAst } from "../../utils/walk-ast.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
 import type { RuleContext } from "../../utils/rule-context.js";
@@ -165,6 +166,11 @@ const inspectServerAction = (
 
   const rootNodes = getAuthScanRoots(candidate.functionNode);
   if (containsAuthCheck(rootNodes, allowedFunctionNames, GENERIC_AUTH_METHOD_NAMES)) return;
+
+  // A cache-busting / navigation-only action touches no protected data, so it
+  // is safe to call unauthenticated. Checked after the bounded auth scan so
+  // the full-body walk is skipped for the common authenticated case.
+  if (isNonPrivilegedServerAction(candidate.functionNode)) return;
 
   context.report({
     node: candidate.reportNode,

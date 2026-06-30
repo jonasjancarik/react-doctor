@@ -489,6 +489,339 @@ export async function updateBio(bio: string) {
     await expect(collectAuthActionIssues(projectDirectory)).resolves.toEqual([]);
   });
 
+  it("accepts an action that only revalidates a cache tag (caching needs no auth)", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-tag-only", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+
+export async function refreshPosts() {
+  revalidateTag("posts");
+}`),
+      },
+    });
+
+    await expect(collectAuthActionIssues(projectDirectory)).resolves.toEqual([]);
+  });
+
+  it("accepts an action that only revalidates a path", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-path-only", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidatePath } from "next/cache";
+
+export const refreshDashboard = async () => {
+  revalidatePath("/dashboard");
+};`),
+      },
+    });
+
+    await expect(collectAuthActionIssues(projectDirectory)).resolves.toEqual([]);
+  });
+
+  it("accepts an action that revalidates then redirects", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-then-redirect", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+
+export async function refresh() {
+  revalidatePath("/");
+  redirect("/");
+}`),
+      },
+    });
+
+    await expect(collectAuthActionIssues(projectDirectory)).resolves.toEqual([]);
+  });
+
+  it("accepts an action whose only effect is a navigation", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "redirect-only", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { redirect } from "next/navigation";
+
+export async function go() {
+  redirect("/dashboard");
+}`),
+      },
+    });
+
+    await expect(collectAuthActionIssues(projectDirectory)).resolves.toEqual([]);
+  });
+
+  it("still flags a revalidation action that also reads data from a non-parameter source", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-plus-db-read", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+import { db } from "@/lib/db";
+
+export async function refresh(userId: string) {
+  const user = await db.user.findUnique({ where: { id: userId } });
+  revalidateTag(\`user-\${user.id}\`);
+}`),
+      },
+    });
+
+    const issues = await collectAuthActionIssues(projectDirectory);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("refresh");
+  });
+
+  it("still flags an action that mutates data alongside a cache revalidation", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-plus-mutation", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+import { db } from "@/lib/db";
+
+export async function deletePost(postId: string) {
+  await db.post.delete({ where: { id: postId } });
+  revalidateTag("posts");
+}`),
+      },
+    });
+
+    const issues = await collectAuthActionIssues(projectDirectory);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("deletePost");
+  });
+
+  it("still flags a raw-SQL tagged-template write next to a revalidation", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-plus-sql-template", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+import { sql } from "@vercel/postgres";
+
+export async function deleteUser(formData: FormData) {
+  await sql\`DELETE FROM users WHERE id = \${formData.get("id")}\`;
+  revalidateTag("users");
+}`),
+      },
+    });
+
+    const issues = await collectAuthActionIssues(projectDirectory);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("deleteUser");
+  });
+
+  it("still flags a constructor side effect next to a revalidation", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-plus-new", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+import { AuditLogger } from "@/lib/audit";
+
+export async function refresh() {
+  new AuditLogger("secret");
+  revalidateTag("posts");
+}`),
+      },
+    });
+
+    const issues = await collectAuthActionIssues(projectDirectory);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("refresh");
+  });
+
+  it("still flags a module-state assignment next to a revalidation", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-plus-assignment", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+import { sessionStore } from "@/lib/store";
+
+export async function grantAdmin(formData: FormData) {
+  sessionStore[formData.get("user") as string] = "admin";
+  revalidateTag("users");
+}`),
+      },
+    });
+
+    const issues = await collectAuthActionIssues(projectDirectory);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("grantAdmin");
+  });
+
+  it("still flags an action that revalidates then returns a referenced value", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-plus-data-return", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+import { serverConfig } from "@/lib/config";
+
+export async function refresh() {
+  revalidateTag("posts");
+  return serverConfig.apiSecret;
+}`),
+      },
+    });
+
+    const issues = await collectAuthActionIssues(projectDirectory);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("refresh");
+  });
+
+  it("accepts an action that revalidates then returns a plain status literal", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-plus-literal-return", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+
+export async function refresh() {
+  revalidateTag("posts");
+  return { revalidated: true };
+}`),
+      },
+    });
+
+    await expect(collectAuthActionIssues(projectDirectory)).resolves.toEqual([]);
+  });
+
+  it("still flags an action that revalidates then returns an awaited value", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-plus-awaited-return", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+import { sessionPromise } from "@/lib/session";
+
+export async function refresh() {
+  revalidateTag("posts");
+  return await sessionPromise;
+}`),
+      },
+    });
+
+    const issues = await collectAuthActionIssues(projectDirectory);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("refresh");
+  });
+
+  it("still flags an action that revalidates then returns data nested in an object", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-plus-nested-return", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+import { serverConfig } from "@/lib/config";
+
+export async function refresh() {
+  revalidateTag("posts");
+  return { token: serverConfig.apiSecret };
+}`),
+      },
+    });
+
+    const issues = await collectAuthActionIssues(projectDirectory);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("refresh");
+  });
+
+  it("still flags an action that revalidates then returns a conditional referencing data", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-plus-conditional-return", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+import { currentUser } from "@/lib/user";
+
+export async function refresh(flag: boolean) {
+  revalidateTag("posts");
+  return flag ? currentUser.email : null;
+}`),
+      },
+    });
+
+    const issues = await collectAuthActionIssues(projectDirectory);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("refresh");
+  });
+
+  it("still flags a `delete` mutation next to a revalidation", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-plus-delete", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+import { sessionStore } from "@/lib/store";
+
+export async function evict(key: string) {
+  delete sessionStore[key];
+  revalidateTag("sessions");
+}`),
+      },
+    });
+
+    const issues = await collectAuthActionIssues(projectDirectory);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("evict");
+  });
+
+  it("still flags an action that revalidates then throws a referenced value", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "revalidate-plus-data-throw", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+import { serverConfig } from "@/lib/config";
+
+export async function refresh() {
+  revalidateTag("posts");
+  throw serverConfig.apiSecret;
+}`),
+      },
+    });
+
+    const issues = await collectAuthActionIssues(projectDirectory);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("refresh");
+  });
+
+  it("accepts a concise-arrow action whose body is a single revalidation", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "concise-arrow-revalidate", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+
+export const refresh = async () => revalidateTag("posts");`),
+      },
+    });
+
+    await expect(collectAuthActionIssues(projectDirectory)).resolves.toEqual([]);
+  });
+
+  it("still flags a concise-arrow action that revalidates then yields data via a sequence", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "concise-arrow-sequence-leak", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { revalidateTag } from "next/cache";
+import { serverConfig } from "@/lib/config";
+
+export const refresh = async () => (revalidateTag("posts"), serverConfig.apiSecret);`),
+      },
+    });
+
+    const issues = await collectAuthActionIssues(projectDirectory);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("refresh");
+  });
+
+  it("does not treat a same-named method call (obj.redirect()) as a safe navigation", async () => {
+    const projectDirectory = setupReactProject(tempRoot, "member-named-redirect", {
+      packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
+      files: {
+        "src/app/actions.ts": buildServerActionFile(`import { emitter } from "@/lib/emitter";
+
+export async function go(payload: string) {
+  emitter.redirect(payload);
+}`),
+      },
+    });
+
+    const issues = await collectAuthActionIssues(projectDirectory);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("go");
+  });
+
   it("still flags actions whose only top-level call is a non-auth helper", async () => {
     const projectDirectory = setupReactProject(tempRoot, "issue-829-non-auth-helper", {
       packageJsonExtras: { dependencies: NEXTJS_PACKAGE_DEPENDENCIES },
