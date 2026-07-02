@@ -4,8 +4,8 @@ import type { EsTreeNode } from "../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../utils/es-tree-node-of-type.js";
 import { isNodeOfType } from "../../utils/is-node-of-type.js";
 import {
+  isMeasurementMemberRead,
   isPostMountGlobalRead,
-  isPostMountMemberRead,
 } from "../../utils/reads-post-mount-value.js";
 import type { RuleContext } from "../../utils/rule-context.js";
 import { walkAst } from "../../utils/walk-ast.js";
@@ -44,12 +44,27 @@ const findEffectLocalInitializer = (effectFn: EsTreeNode, name: string): EsTreeN
   return initializer;
 };
 
+// A measurement-global identifier only defers state init when it feeds a DOM
+// API CALL (`window.matchMedia(...)`, `document.querySelector(...)`): the call
+// returns a live runtime object that has no render-time equivalent. A plain
+// scalar property read (`window.innerWidth`) is hoistable into a lazy
+// `useState(() => window.innerWidth)` initializer, so it keeps the
+// init-in-an-effect smell.
+const isMeasurementApiCallReceiver = (identifier: EsTreeNode): boolean => {
+  const memberParent = identifier.parent;
+  if (!isNodeOfType(memberParent, "MemberExpression") || memberParent.object !== identifier) {
+    return false;
+  }
+  const callGrandparent = memberParent.parent;
+  return isNodeOfType(callGrandparent, "CallExpression") && callGrandparent.callee === memberParent;
+};
+
 // Does the setter argument derive from a DOM/layout measurement — directly
 // (`setShowThumb(viewportRef.current.scrollHeight > 0)`) or through an
 // effect-local variable (`const mq = window.matchMedia(...); setMode(mq.matches
 // ? "dark" : "light")`)? Such values can't be hoisted into `useState(initial)`
-// (the element isn't mounted; the global is absent under SSR), so the mount
-// effect is the correct home for them.
+// (the element isn't mounted; the API object has no render-time equivalent),
+// so the mount effect is the correct home for them.
 const argumentReadsPostMountMeasurement = (
   argument: EsTreeNode,
   effectFn: EsTreeNode,
@@ -58,12 +73,16 @@ const argumentReadsPostMountMeasurement = (
   let found = false;
   walkAst(argument, (child: EsTreeNode): boolean | void => {
     if (found) return false;
-    if (isPostMountMemberRead(child)) {
+    if (isMeasurementMemberRead(child)) {
       found = true;
       return false;
     }
     if (!isNodeOfType(child, "Identifier")) return;
-    if (isPostMountGlobalRead(child) && MEASUREMENT_GLOBAL_NAMES.has(child.name)) {
+    if (
+      isPostMountGlobalRead(child) &&
+      MEASUREMENT_GLOBAL_NAMES.has(child.name) &&
+      isMeasurementApiCallReceiver(child)
+    ) {
       found = true;
       return false;
     }

@@ -42,8 +42,46 @@ const collectDependencyArrayNames = (componentBody: EsTreeNode): Set<string> => 
   return dependencyNames;
 };
 
-// Names referenced inside an EFFECT hook's callback body (its render-time
-// arguments — the dependency array — are NOT included).
+const isPureEarlyExitConsequent = (consequent: EsTreeNode): boolean => {
+  if (isNodeOfType(consequent, "ContinueStatement")) return true;
+  if (isNodeOfType(consequent, "ReturnStatement")) {
+    return (
+      !consequent.argument ||
+      (isNodeOfType(consequent.argument, "Literal") && consequent.argument.value === null)
+    );
+  }
+  if (isNodeOfType(consequent, "BlockStatement")) {
+    const statements = consequent.body ?? [];
+    return statements.length === 1 && isPureEarlyExitConsequent(statements[0] as EsTreeNode);
+  }
+  return false;
+};
+
+const collectEarlyExitGuardStatements = (
+  effectCallback: EsTreeNode,
+): EsTreeNodeOfType<"IfStatement">[] => {
+  const guardStatements: EsTreeNodeOfType<"IfStatement">[] = [];
+  walkAst(effectCallback, (child: EsTreeNode) => {
+    if (
+      isNodeOfType(child, "IfStatement") &&
+      !child.alternate &&
+      isPureEarlyExitConsequent(child.consequent as EsTreeNode)
+    ) {
+      guardStatements.push(child);
+    }
+  });
+  return guardStatements;
+};
+
+// Names whose VALUE is consumed inside an EFFECT hook's callback body (its
+// render-time arguments — the dependency array — are NOT included). Reads
+// that only gate an early exit (`if (!dirty) return;`) do not count: the
+// guard needs the re-run, not the content, so the dep stays a pure trigger
+// (the debounced-save shape). A name read anywhere else in the callback
+// (`getEmojiPickerData(emojiData, …)`) is a payload read. The guard tests
+// are detached while the scope-aware collector runs so payload reads and
+// guard reads resolve through the SAME binding scopes — a local that
+// shadows a state name can neither hide nor fake a read of the outer value.
 const collectEffectCallbackReadNames = (componentBody: EsTreeNode): Set<string> => {
   const readNames = new Set<string>();
   walkAst(componentBody, (child: EsTreeNode) => {
@@ -56,12 +94,27 @@ const collectEffectCallbackReadNames = (componentBody: EsTreeNode): Set<string> 
     ) {
       return;
     }
-    for (const referenceName of collectScopedReferenceNames(
-      effectCallback,
-      createComponentBindingScope(),
-      new Set(),
-    )) {
-      readNames.add(referenceName);
+    const guardStatements = collectEarlyExitGuardStatements(effectCallback);
+    const detachedGuardTests = guardStatements.map((statement) => statement.test);
+    // HACK: the guard tests are detached in place (and reattached
+    // synchronously below) so the collector never sees them — walking
+    // them separately would need a second, drift-prone scope tracker.
+    for (const statement of guardStatements) {
+      (statement as unknown as { test: EsTreeNode | null }).test = null;
+    }
+    try {
+      for (const referenceName of collectScopedReferenceNames(
+        effectCallback,
+        createComponentBindingScope(),
+        new Set(),
+      )) {
+        readNames.add(referenceName);
+      }
+    } finally {
+      guardStatements.forEach((statement, index) => {
+        (statement as unknown as { test: EsTreeNode | null }).test =
+          detachedGuardTests[index] ?? null;
+      });
     }
   });
   return readNames;
