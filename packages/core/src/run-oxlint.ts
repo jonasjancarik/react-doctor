@@ -100,6 +100,8 @@ interface RunOxlintOptions {
    * of running on after the phase is abandoned.
    */
   signal?: AbortSignal;
+  /** See `SpawnLintBatchesInput.deadlineEpochMs`. */
+  deadlineEpochMs?: number;
   /**
    * Full-scan batch ordering, resolved from the `LintBatchOrdering`
    * Reference. `"arrival"` (the default) keeps discovery order; `"cost"`
@@ -385,6 +387,7 @@ export const runOxlint = async (options: RunOxlintOptions): Promise<Diagnostic[]
           outputMaxBytes,
           concurrency: options.concurrency,
           signal: options.signal,
+          deadlineEpochMs: options.deadlineEpochMs,
         });
       writeOxlintConfig(passConfigPath, buildConfigForPass({}));
       try {
@@ -541,6 +544,7 @@ export const runOxlint = async (options: RunOxlintOptions): Promise<Diagnostic[]
         outputMaxBytes,
         concurrency: options.concurrency,
         signal: options.signal,
+        deadlineEpochMs: options.deadlineEpochMs,
       });
 
     writeOxlintConfig(configPath, buildConfig({ extendsPaths }));

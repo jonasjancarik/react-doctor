@@ -69,6 +69,7 @@ const baseInput = (overrides: Partial<RunEventInput> = {}): RunEventInput => ({
   scope: "full",
   parallel: true,
   workerCount: 4,
+  maxDurationMs: null,
   lint: true,
   deadCode: true,
   scoreOnly: false,
@@ -346,6 +347,16 @@ describe("buildRunEventAttributes", () => {
     // Not passed -> null -> dropped, never coerced to a misleading "null".
     const withoutDrops = buildRunEventAttributes(baseInput({ result: buildResult() }));
     expect(withoutDrops["lint.droppedFileCount"]).toBeUndefined();
+  });
+
+  it("records lint.deadlineSkippedFileCount when present and drops it when absent", () => {
+    const withSkips = buildRunEventAttributes(
+      baseInput({ result: buildResult(), lintDeadlineSkippedFileCount: 12 }),
+    );
+    expect(withSkips["lint.deadlineSkippedFileCount"]).toBe(12);
+
+    const withoutSkips = buildRunEventAttributes(baseInput({ result: buildResult() }));
+    expect(withoutSkips["lint.deadlineSkippedFileCount"]).toBeUndefined();
   });
 
   it("rolls suppressed findings up by source and drops the dims when tallies are absent", () => {

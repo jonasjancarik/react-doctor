@@ -310,6 +310,13 @@ export const inspectAction = async (directory: string, flags: InspectFlags): Pro
     }
 
     const scanOptions: CliInspectOptions = resolveCliInspectOptions(flags, userConfig);
+    // One `--max-duration` budget per invocation, shared by every project of a
+    // workspace scan: fix the absolute deadline once here and hand it to each
+    // project's `inspect()` (rather than restarting the budget per project).
+    // `maxDurationMs` on `scanOptions` stays the configured value so telemetry
+    // reports what the user set, not each project's leftover.
+    const scanDeadlineEpochMs =
+      scanOptions.maxDurationMs !== undefined ? Date.now() + scanOptions.maxDurationMs : undefined;
     const categoryFilters = new Set(scanOptions.categoryFilters ?? []);
     const skipPrompts = shouldSkipPrompts({ yes: flags.yes, json: flags.json });
 
@@ -372,6 +379,7 @@ export const inspectAction = async (directory: string, flags: InspectFlags): Pro
       try {
         const scanResult = await inspect(snapshot.tempDirectory, {
           ...scanOptions,
+          deadlineEpochMs: scanDeadlineEpochMs,
           includePaths: snapshot.stagedFiles,
           configOverride: userConfig,
           // Resolve `config.plugins` from the real config directory — the
@@ -573,6 +581,7 @@ export const inspectAction = async (directory: string, flags: InspectFlags): Pro
       }
       const scanResult = await inspect(scanDirectory, {
         ...scanOptions,
+        deadlineEpochMs: scanDeadlineEpochMs,
         includePaths,
         configOverride: projectConfig,
         configSourceDirectory: projectConfigSourceDirectory ?? undefined,

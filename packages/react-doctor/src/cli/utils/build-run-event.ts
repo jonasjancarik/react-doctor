@@ -39,6 +39,8 @@ export interface RunEventInput {
   readonly scope: string;
   readonly parallel: boolean;
   readonly workerCount: number | undefined;
+  /** `--max-duration` budget in milliseconds; `null` when no budget was set. */
+  readonly maxDurationMs: number | null;
   readonly lint: boolean;
   readonly deadCode: boolean;
   readonly scoreOnly: boolean;
@@ -60,6 +62,11 @@ export interface RunEventInput {
   // if cost-ordering front-loads the pathological bucket and drops MORE files,
   // this rises on the `cost` cohort vs `arrival`.
   readonly lintDroppedFileCount?: number;
+  // Total files skipped because the `--max-duration` budget ran out — the
+  // "did the budget actually truncate a scan" kill-metric signal for the
+  // flag, distinct from `scan.maxDurationMs` (configured) and
+  // `lintDroppedFileCount` (pathological batches).
+  readonly lintDeadlineSkippedFileCount?: number;
   readonly didDeadCodeFail?: boolean;
   // `true` when the background supply-chain check hit its overlap budget and
   // failed open to no diagnostics. The kill metric for the lint/supply-chain
@@ -263,6 +270,7 @@ const buildOutcomeAttributes = (input: RunEventInput): RunEventAttributes => {
       failureReasonKind: input.lintFailureReasonKind ?? null,
       partialFailureCount: input.lintPartialFailureCount ?? null,
       droppedFileCount: input.lintDroppedFileCount ?? null,
+      deadlineSkippedFileCount: input.lintDeadlineSkippedFileCount ?? null,
       // Per-file lint cache outcome. Numeric so Sentry can `p75(lint.cacheHitRatio)`;
       // all `null` when the cache was off/bypassed so "no cache" reads distinctly
       // from a 0% hit rate (`toSpanAttributes` drops the nulls).
@@ -338,6 +346,7 @@ const buildScanAttributes = (input: RunEventInput): RunEventAttributes => {
     scope: input.scope,
     parallel: input.parallel,
     workerCount: input.workerCount ?? null,
+    maxDurationMs: input.maxDurationMs,
     lint: input.lint,
     deadCode: input.deadCode,
     scoreOnly: input.scoreOnly,

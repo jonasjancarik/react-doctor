@@ -28,6 +28,7 @@ import { recordCount } from "./cli/utils/record-metric.js";
 import { recordScanMetrics } from "./cli/utils/record-scan-metrics.js";
 import { recordRunEvent } from "./cli/utils/build-run-event.js";
 import { resolveWorkerTelemetry } from "./cli/utils/resolve-worker-telemetry.js";
+import { countDeadlineSkippedFiles } from "./cli/utils/count-deadline-skipped-files.js";
 import { countDroppedLintFiles } from "./cli/utils/count-dropped-lint-files.js";
 import type {
   ChangedFileLineRanges,
@@ -137,6 +138,14 @@ const buildChangedLineMatcher = (
 
 export interface ReactDoctorInspectOptions extends InspectOptions {
   categoryFilters?: string[];
+  /**
+   * Internal: an absolute epoch-ms deadline shared across a workspace scan's
+   * projects. The CLI sets it so every project honors ONE `--max-duration`
+   * budget without restarting it per project, while `maxDurationMs` stays the
+   * user's configured value (so telemetry reports what they set). When unset,
+   * the deadline is derived from `maxDurationMs` at call start.
+   */
+  deadlineEpochMs?: number;
 }
 
 export interface ResolvedInspectOptions {
@@ -165,6 +174,8 @@ export interface ResolvedInspectOptions {
   concurrentScan: boolean;
   /** Resolved oxlint worker count, or `undefined` to keep the ambient default. */
   concurrency: number | undefined;
+  /** Scan time budget in milliseconds, or `null` for no budget. */
+  maxDurationMs: number | null;
   /** Baseline ref to subtract (new-only mode), or `null` for a plain scan. */
   baseline: { ref: string } | null;
   /**
@@ -212,6 +223,7 @@ const mergeInspectOptions = (
   suppressRendering: inputOptions.suppressRendering ?? false,
   concurrentScan: inputOptions.concurrentScan ?? false,
   concurrency: inputOptions.concurrency,
+  maxDurationMs: inputOptions.maxDurationMs ?? null,
   baseline: inputOptions.baseline ?? null,
   changedLineRanges: inputOptions.changedLineRanges ?? null,
   supplyChainManifestChanged: inputOptions.supplyChainManifestChanged ?? false,
@@ -250,6 +262,7 @@ const buildRunEventConfig = (
     scope: deriveScope(options),
     parallel,
     workerCount,
+    maxDurationMs: options.maxDurationMs,
     lint: options.lint,
     deadCode: options.deadCode,
     scoreOnly: options.scoreOnly,
@@ -268,6 +281,14 @@ export const inspect = async (
   inputOptions: ReactDoctorInspectOptions = {},
 ): Promise<InspectResult> => {
   const startTime = performance.now();
+  // The CLI passes an absolute `deadlineEpochMs` shared across a workspace
+  // scan's projects (one budget, not restarted per project). A programmatic
+  // caller passes only `maxDurationMs`, so derive the deadline here — before
+  // any discovery / native-binding preamble, so that work doesn't silently
+  // push the effective budget later. `null` when no budget was set.
+  const deadlineEpochMs =
+    inputOptions.deadlineEpochMs ??
+    (inputOptions.maxDurationMs != null ? Date.now() + inputOptions.maxDurationMs : null);
 
   // Clear any run-scoped Sentry state from a prior inspect() so a stale
   // project/trace can't leak onto this run's events — including errors thrown
@@ -331,6 +352,7 @@ export const inspect = async (
             hasConfigOverride,
             configSourceDirectory,
             startTime,
+            deadlineEpochMs,
             rootSentrySpan,
           );
         } catch (error) {
@@ -368,6 +390,14 @@ interface BaselineComparison {
   baselineDelta: NonNullable<InspectResult["baselineDelta"]>;
 }
 
+// Files the lint pass failed to cover — dropped (pathological batches) plus
+// deadline-skipped. Distinct from `lintPartialFailures.length`, which also
+// counts informational notes (e.g. the react-hooks-js plugin-drop) that leave
+// the lint COMPLETE. Baseline comparison is only unreliable when coverage is
+// actually incomplete, so it degrades on this count, not on any partial string.
+const countIncompleteLintFiles = (lintPartialFailures: ReadonlyArray<string>): number =>
+  countDroppedLintFiles(lintPartialFailures) + countDeadlineSkippedFiles(lintPartialFailures);
+
 interface RunBaselineComparisonInput {
   directory: string;
   options: ResolvedInspectOptions;
@@ -384,6 +414,8 @@ interface RunBaselineComparisonInput {
   headDiagnostics: ReadonlyArray<Diagnostic>;
   resolvedNodeBinaryPath: string | null;
   baselineRef: string;
+  /** Shared invocation deadline; bounds the base-ref lint like the head scan. */
+  deadlineEpochMs: number | null;
 }
 
 /**
@@ -440,6 +472,9 @@ const runBaselineComparison = async (
         // Score the base manifest too so `computeDiagnosticDelta` filters out
         // pre-existing low-score dependencies instead of reporting them as new.
         supplyChainManifestChanged: params.options.supplyChainManifestChanged,
+        // The base-ref lint shares the invocation deadline, so a --max-duration
+        // budget bounds the whole run, not just the head scan.
+        deadlineEpochMs: params.deadlineEpochMs ?? undefined,
       },
       {},
     );
@@ -451,12 +486,13 @@ const runBaselineComparison = async (
         ),
       ),
     );
-    // A failed base lint leaves base findings unreliable/empty, which would
-    // mislabel pre-existing head issues as newly introduced. Signal "no delta"
-    // (null) so the caller degrades to a plain diff — full head findings stay
-    // visible, but the run won't claim they're new or gate on them. A genuinely
-    // empty but *successful* base lint is fine — every head finding is new.
-    if (baseOutput.didLintFail) {
+    // A failed OR budget-truncated base lint leaves base findings
+    // unreliable/incomplete, which would mislabel pre-existing head issues as
+    // newly introduced. Signal "no delta" (null) so the caller degrades to a
+    // plain diff — full head findings stay visible, but the run won't claim
+    // they're new or gate on them. A genuinely empty but *successful* base lint
+    // is fine — every head finding is new.
+    if (baseOutput.didLintFail || countIncompleteLintFiles(baseOutput.lintPartialFailures) > 0) {
       return null;
     }
     const delta = computeDiagnosticDelta({
@@ -485,6 +521,7 @@ const runInspectWithRuntime = async (
   hasConfigOverride: boolean,
   configSourceDirectory: string | null,
   startTime: number,
+  deadlineEpochMs: number | null,
   rootSentrySpan: SentryRootSpan,
 ): Promise<InspectResult> => {
   const isDiffMode = options.includePaths.length > 0;
@@ -582,6 +619,7 @@ const runInspectWithRuntime = async (
       suppressScanSummary: options.suppressRendering,
       supplyChainManifestChanged: options.supplyChainManifestChanged,
       concurrentScan: options.concurrentScan,
+      deadlineEpochMs: deadlineEpochMs ?? undefined,
     },
     {
       beforeLint: (projectInfo, lintIncludePaths) =>
@@ -664,7 +702,15 @@ const runInspectWithRuntime = async (
   // blaming the PR for pre-existing ones.
   let inspectDiagnostics: ReadonlyArray<Diagnostic> = output.diagnostics;
   let baselineDelta: InspectResult["baselineDelta"];
-  if (options.baseline && isDiffMode && !didLintFail) {
+  // A head lint that dropped or deadline-skipped files is incomplete, so the
+  // delta would silently miss findings in the unlinted files — degrade to a
+  // plain diff exactly like a failed head lint.
+  if (
+    options.baseline &&
+    isDiffMode &&
+    !didLintFail &&
+    countIncompleteLintFiles(output.lintPartialFailures) === 0
+  ) {
     const comparison = await runBaselineComparison({
       directory,
       options,
@@ -674,6 +720,7 @@ const runInspectWithRuntime = async (
       headDiagnostics: output.diagnostics,
       resolvedNodeBinaryPath,
       baselineRef: options.baseline.ref,
+      deadlineEpochMs,
     });
     if (comparison) {
       inspectDiagnostics = comparison.displayDiagnostics;
@@ -882,6 +929,7 @@ const renderAndRecordScan = async (input: RenderAndRecordScanInput): Promise<Ins
     lintFailureReasonKind: input.payload.lintFailureReasonKind,
     lintPartialFailureCount: input.payload.lintPartialFailures.length,
     lintDroppedFileCount: countDroppedLintFiles(input.payload.lintPartialFailures),
+    lintDeadlineSkippedFileCount: countDeadlineSkippedFiles(input.payload.lintPartialFailures),
     didDeadCodeFail: input.payload.didDeadCodeFail,
     supplyChainOverlapTimedOut: input.payload.supplyChainOverlapTimedOut,
     securityScanFailed: input.payload.securityScanFailed,
