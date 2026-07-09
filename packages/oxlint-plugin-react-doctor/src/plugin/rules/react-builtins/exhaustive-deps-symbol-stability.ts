@@ -18,8 +18,8 @@ import {
  * One cohesive concept: "given a captured symbol, is its value
  * structurally stable across re-renders (and therefore unnecessary
  * in a deps array)?". The rule reads `symbolHasStableValue` /
- * `symbolHasStableHookOrigin` / `symbolHasUseEffectEventOrigin` /
- * `isRecursiveInitializerCapture` at multiple sites — extracting
+ * `symbolHasStableHookOrigin` / `isRecursiveInitializerCapture` at
+ * multiple sites — extracting
  * them lets the rule body stay focused on the diff-the-captured-vs-
  * declared logic.
  *
@@ -119,12 +119,6 @@ export const symbolHasStableHookOrigin = (symbol: SymbolDescriptor): boolean => 
     return isNodeOfType(innerBinding, "Identifier") && symbol.bindingIdentifier === innerBinding;
   }
   return false;
-};
-
-export const symbolHasUseEffectEventOrigin = (symbol: SymbolDescriptor): boolean => {
-  const initializer = symbol.initializer ? unwrapExpression(symbol.initializer) : null;
-  if (!initializer || !isNodeOfType(initializer, "CallExpression")) return false;
-  return getHookName(initializer.callee) === "useEffectEvent";
 };
 
 export const getFunctionValueNode = (symbol: SymbolDescriptor): EsTreeNode | null => {
