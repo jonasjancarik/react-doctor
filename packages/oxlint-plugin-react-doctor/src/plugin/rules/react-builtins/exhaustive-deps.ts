@@ -602,6 +602,34 @@ const isUnstableInitializer = (node: EsTreeNode | null): boolean => {
   );
 };
 
+const isPotentiallyFreshComparedValue = (
+  node: EsTreeNode,
+  scopes: ScopeAnalysis,
+  visitedSymbolIds: Set<number> = new Set(),
+): boolean => {
+  const candidate = unwrapExpression(node);
+  if (isUnstableInitializer(candidate)) return true;
+  if (isNodeOfType(candidate, "ConditionalExpression")) {
+    return (
+      isPotentiallyFreshComparedValue(candidate.consequent, scopes, visitedSymbolIds) ||
+      isPotentiallyFreshComparedValue(candidate.alternate, scopes, visitedSymbolIds)
+    );
+  }
+  if (isNodeOfType(candidate, "LogicalExpression")) {
+    return (
+      isPotentiallyFreshComparedValue(candidate.left, scopes, visitedSymbolIds) ||
+      isPotentiallyFreshComparedValue(candidate.right, scopes, visitedSymbolIds)
+    );
+  }
+  if (!isNodeOfType(candidate, "Identifier")) return false;
+  const symbol = scopes.symbolFor(candidate);
+  if (!symbol || visitedSymbolIds.has(symbol.id)) return false;
+  if (symbol.kind === "let" || symbol.kind === "var") return true;
+  if (symbol.kind !== "const" || !symbol.initializer) return false;
+  visitedSymbolIds.add(symbol.id);
+  return isPotentiallyFreshComparedValue(symbol.initializer, scopes, visitedSymbolIds);
+};
+
 const isExtraDepAllowedForHook = (
   hookName: string,
   node: EsTreeNode,
@@ -635,6 +663,79 @@ const isStableSetterLikeSymbol = (symbol: SymbolDescriptor, scopes: ScopeAnalysi
   );
 };
 
+const isConvergingFunctionalUpdater = (node: EsTreeNode, scopes: ScopeAnalysis): boolean => {
+  const updater = unwrapExpression(node);
+  if (
+    !isNodeOfType(updater, "ArrowFunctionExpression") &&
+    !isNodeOfType(updater, "FunctionExpression")
+  ) {
+    return false;
+  }
+  const previousValueParameter = updater.params?.[0];
+  if (!previousValueParameter || !isNodeOfType(previousValueParameter, "Identifier")) return false;
+  let returnedExpression: EsTreeNode | null | undefined = updater.body;
+  if (isNodeOfType(updater.body, "BlockStatement")) {
+    returnedExpression = null;
+    for (const statement of updater.body.body ?? []) {
+      if (isNodeOfType(statement, "ReturnStatement") && statement.argument) {
+        returnedExpression = statement.argument;
+        break;
+      }
+    }
+  }
+  const conditional = returnedExpression ? unwrapExpression(returnedExpression) : null;
+  if (!conditional || !isNodeOfType(conditional, "ConditionalExpression")) return false;
+  const test = unwrapExpression(conditional.test);
+  if (
+    !isNodeOfType(test, "BinaryExpression") ||
+    !["===", "!==", "==", "!="].includes(test.operator)
+  ) {
+    return false;
+  }
+  const isPreviousValue = (expression: EsTreeNode): boolean => {
+    const candidate = unwrapExpression(expression);
+    return isNodeOfType(candidate, "Identifier") && candidate.name === previousValueParameter.name;
+  };
+  let comparedValue: EsTreeNode | null = null;
+  if (isPreviousValue(test.left)) comparedValue = test.right;
+  else if (isPreviousValue(test.right)) comparedValue = test.left;
+  if (!comparedValue) return false;
+  if (isPotentiallyFreshComparedValue(comparedValue, scopes)) return false;
+  const isSameComparedValue = (expression: EsTreeNode): boolean => {
+    const candidate = unwrapExpression(expression);
+    const compared = unwrapExpression(comparedValue);
+    if (isNodeOfType(candidate, "Identifier") && isNodeOfType(compared, "Identifier")) {
+      return candidate.name === compared.name;
+    }
+    if (isNodeOfType(candidate, "Literal") && isNodeOfType(compared, "Literal")) {
+      return candidate.value === compared.value;
+    }
+    return false;
+  };
+  const equalityTest = test.operator === "===" || test.operator === "==";
+  return equalityTest
+    ? isPreviousValue(conditional.consequent) && isSameComparedValue(conditional.alternate)
+    : isSameComparedValue(conditional.consequent) && isPreviousValue(conditional.alternate);
+};
+
+const isGuardedStableSetterCall = (
+  identifier: EsTreeNode,
+  symbol: SymbolDescriptor,
+  scopes: ScopeAnalysis,
+): boolean => {
+  const parent = identifier.parent;
+  if (
+    !parent ||
+    !isNodeOfType(parent, "CallExpression") ||
+    parent.callee !== identifier ||
+    !isStableSetterLikeSymbol(symbol, scopes)
+  ) {
+    return false;
+  }
+  const writtenValue = parent.arguments?.[0];
+  return Boolean(writtenValue && isConvergingFunctionalUpdater(writtenValue, scopes));
+};
+
 const findStableSetterReference = (node: EsTreeNode, scopes: ScopeAnalysis): string | null => {
   let setterName: string | null = null;
   const visit = (current: EsTreeNode): void => {
@@ -650,7 +751,11 @@ const findStableSetterReference = (node: EsTreeNode, scopes: ScopeAnalysis): str
     if (isNodeOfType(current, "Identifier")) {
       const reference = scopes.referenceFor(current);
       const symbol = reference?.resolvedSymbol;
-      if (symbol && isStableSetterLikeSymbol(symbol, scopes)) {
+      if (
+        symbol &&
+        isStableSetterLikeSymbol(symbol, scopes) &&
+        !isGuardedStableSetterCall(current, symbol, scopes)
+      ) {
         setterName = symbol.name;
         return;
       }
