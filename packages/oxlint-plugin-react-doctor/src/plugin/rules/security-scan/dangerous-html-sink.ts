@@ -1,6 +1,7 @@
 import { defineRule } from "../../utils/define-rule.js";
 import type { ScanFinding } from "../../utils/file-scan.js";
 import { escapeRegExp } from "./utils/escape-reg-exp.js";
+import { findMatchingBracket } from "./utils/find-matching-bracket.js";
 import { isProductionSourcePath } from "./utils/is-production-source-path.js";
 
 // HTML-injection sinks: React's `dangerouslySetInnerHTML`, the DOM
@@ -94,6 +95,9 @@ const HIGHLIGHTER_LIBRARY_PATTERN =
 // imports a highlighter — checking the assignment keeps the trust link.
 const SERIALIZER_ASSIGNMENT_PATTERN =
   /[:=]\s*[^\n;]*(?:\b(?:katex|shiki|hljs|prism|mermaid)\b|hast-util-to-html|renderHtmlFromRichText|(?:toHtml|render[A-Za-z]*(?:Html|HTML)|renderToString|renderToStaticMarkup|codeToHtml|codeToHast)\s*\()/i;
+
+const SERIALIZER_CALL_PROVENANCE_PATTERN =
+  /\b(?:(?:katex|shiki|hljs|prism|mermaid|highlighter)[\w$]*\.(?:render\w*|highlight\w*|codeTo(?:Html|Hast))|(?:toHtml|render(?:Html|HTML)[A-Za-z]*|render[A-Za-z]*(?:Html|HTML)|renderToString|renderToStaticMarkup|codeToHtml|codeToHast|highlight[A-Za-z]*))\s*\(/i;
 
 const BARE_IDENTIFIER_VALUE_PATTERN = /^[\w$]+\s*(?:[;,})\n]|$)/;
 
@@ -382,8 +386,10 @@ const findContainingBlockEndIndex = (fileContent: string, targetIndex: number): 
 };
 
 interface VisibleIdentifierDeclaration {
+  readonly declarationIndex: number;
   readonly initializer: string;
   readonly initializerStartIndex: number;
+  readonly isImmutable: boolean;
 }
 
 const findVisibleIdentifierDeclaration = (
@@ -392,7 +398,7 @@ const findVisibleIdentifierDeclaration = (
   fileContent: string,
 ): VisibleIdentifierDeclaration | null => {
   const initializerPattern = new RegExp(
-    `(?:const|let|var)\\s+${escapeRegExp(identifier)}\\s*(?::[^=\\n]*)?=\\s*([^;\\n]+)`,
+    `(const|let|var)\\s+${escapeRegExp(identifier)}\\s*(?::[^=\\n]*)?=\\s*([^;\\n]+)`,
     "g",
   );
   let nearestDeclaration: VisibleIdentifierDeclaration | null = null;
@@ -408,17 +414,111 @@ const findVisibleIdentifierDeclaration = (
       continue;
     }
     nearestDeclarationIndex = declarationIndex;
-    const initializer = match[1];
+    const initializer = match[2];
     if (initializer === undefined) continue;
     nearestDeclaration = {
+      declarationIndex,
       initializer,
       initializerStartIndex: declarationIndex + match[0].length - initializer.length,
+      isImmutable: match[1] === "const",
     };
   }
   return nearestDeclaration;
 };
 
+const isTrustedHighlighterValue = (
+  valueExpression: string,
+  fileContent: string,
+  sinkIndex: number,
+): boolean => {
+  if (!/highlight/i.test(valueExpression)) return false;
+  const identifier = valueExpression.match(/^([\w$]+)/)?.[1];
+  if (identifier === undefined) return false;
+  const declaration = findVisibleIdentifierDeclaration(identifier, sinkIndex, fileContent);
+  if (declaration !== null) {
+    return SERIALIZER_CALL_PROVENANCE_PATTERN.test(declaration.initializer);
+  }
+  return /highlighted/i.test(valueExpression) || HIGHLIGHTER_LIBRARY_PATTERN.test(fileContent);
+};
+
+const isExplicitlyTrustedHtmlValue = (
+  valueExpression: string,
+  fileContent: string,
+  sinkIndex: number,
+  visitedIdentifiers: Set<string> = new Set(),
+): boolean => {
+  const trimmedExpression = valueExpression.trim();
+  const concatenatedParts = splitTopLevelByPlus(trimmedExpression);
+  if (concatenatedParts.length > 1) {
+    return concatenatedParts.every((part) =>
+      isExplicitlyTrustedHtmlValue(part, fileContent, sinkIndex, visitedIdentifiers),
+    );
+  }
+  const interpolationParts = [...trimmedExpression.matchAll(/\$\{([^}]*)\}/g)].flatMap((match) =>
+    match[1] === undefined ? [] : [match[1]],
+  );
+  if (interpolationParts.length > 1) {
+    return interpolationParts.every((part) =>
+      isExplicitlyTrustedHtmlValue(part, fileContent, sinkIndex, visitedIdentifiers),
+    );
+  }
+  const identifier = trimmedExpression.match(
+    /^([\w$]+)(?:(?:\??\.[\w$]+)|(?:\[\s*(?:"[^"\n]*"|'[^'\n]*'|\d+)\s*\]))*$/,
+  )?.[1];
+  if (identifier && !visitedIdentifiers.has(identifier)) {
+    const declaration = findVisibleIdentifierDeclaration(identifier, sinkIndex, fileContent);
+    if (declaration) {
+      const nextVisitedIdentifiers = new Set(visitedIdentifiers);
+      nextVisitedIdentifiers.add(identifier);
+      return isExplicitlyTrustedHtmlValue(
+        declaration.initializer,
+        fileContent,
+        declaration.initializerStartIndex,
+        nextVisitedIdentifiers,
+      );
+    }
+  }
+  if (
+    STRING_LITERAL_VALUE_PATTERN.test(`${trimmedExpression};`) ||
+    MODULE_CONSTANT_VALUE_PATTERN.test(`${trimmedExpression};`) ||
+    SANITIZER_PATTERN.test(trimmedExpression) ||
+    ENV_CONFIG_VALUE_PATTERN.test(trimmedExpression) ||
+    I18N_VALUE_PATTERN.test(trimmedExpression) ||
+    ESCAPING_SERIALIZER_CALL_PATTERN.test(trimmedExpression) ||
+    isTrustedHighlighterValue(trimmedExpression, fileContent, sinkIndex)
+  ) {
+    return true;
+  }
+  return false;
+};
+
+const doesExpressionAliasIdentifier = (
+  expression: string,
+  targetIdentifier: string,
+  expressionIndex: number,
+  fileContent: string,
+  visitedIdentifiers: Set<string> = new Set(),
+): boolean => {
+  const identifier = expression.trim().match(/^([\w$]+)$/)?.[1];
+  if (!identifier) return false;
+  if (identifier === targetIdentifier) return true;
+  if (visitedIdentifiers.has(identifier)) return false;
+  const declaration = findVisibleIdentifierDeclaration(identifier, expressionIndex, fileContent);
+  if (!declaration?.isImmutable) return false;
+  const nextVisitedIdentifiers = new Set(visitedIdentifiers);
+  nextVisitedIdentifiers.add(identifier);
+  return doesExpressionAliasIdentifier(
+    declaration.initializer,
+    targetIdentifier,
+    declaration.initializerStartIndex,
+    fileContent,
+    nextVisitedIdentifiers,
+  );
+};
+
 interface FunctionParameterSource {
+  readonly bodyEndIndex: number;
+  readonly declarationNameIndex: number;
   readonly functionName: string;
   readonly parameterIndex: number;
 }
@@ -441,7 +541,8 @@ const findContainingFunctionParameterSource = (
         continue;
       }
       const openingBraceIndex = matchIndex + match[0].lastIndexOf("{");
-      if (findMatchingBraceIndex(fileContent, openingBraceIndex) < sinkIndex) continue;
+      const bodyEndIndex = findMatchingBraceIndex(fileContent, openingBraceIndex);
+      if (bodyEndIndex < sinkIndex) continue;
       const parameterIndex = (match[2] ?? "")
         .split(",")
         .findIndex(
@@ -449,7 +550,13 @@ const findContainingFunctionParameterSource = (
         );
       if (parameterIndex < 0) continue;
       closestStartIndex = matchIndex;
-      closestSource = { functionName: match[1] ?? "", parameterIndex };
+      const functionName = match[1] ?? "";
+      closestSource = {
+        bodyEndIndex,
+        declarationNameIndex: matchIndex + match[0].indexOf(functionName),
+        functionName,
+        parameterIndex,
+      };
     }
   }
   return closestSource;
@@ -486,43 +593,99 @@ const isHtmlTainted = (
   fileContent: string,
   sinkIndex: number,
   visitedIdentifiers: Set<string>,
+  visitedCallSites: Set<number>,
 ): boolean => {
   const trimmedExpression = expression.trim();
-  if (STRING_LITERAL_VALUE_PATTERN.test(`${trimmedExpression};`)) return false;
-  if (MODULE_CONSTANT_VALUE_PATTERN.test(`${trimmedExpression};`)) return false;
-  if (SANITIZER_PATTERN.test(trimmedExpression)) return false;
-  if (ENV_CONFIG_VALUE_PATTERN.test(trimmedExpression)) return false;
-  if (I18N_VALUE_PATTERN.test(trimmedExpression)) return false;
-  if (ESCAPING_SERIALIZER_CALL_PATTERN.test(trimmedExpression)) return false;
-  if (HTML_TAINT_PATTERN.test(trimmedExpression)) return true;
-  const identifier = trimmedExpression.match(/^([\w$]+)\s*(?:[;,})\n]|$)/)?.[1];
-  if (identifier === undefined || visitedIdentifiers.has(identifier)) return false;
+  if (isExplicitlyTrustedHtmlValue(trimmedExpression, fileContent, sinkIndex)) return false;
+  const identifier = trimmedExpression.match(/^([\w$]+)(?:\.|\s*(?:[;,})\n]|$))/)?.[1];
+  if (identifier === undefined) return HTML_TAINT_PATTERN.test(trimmedExpression);
+  if (visitedIdentifiers.has(identifier)) return false;
   visitedIdentifiers.add(identifier);
 
   const declaration = findVisibleIdentifierDeclaration(identifier, sinkIndex, fileContent);
-  if (
+  const parameterSource = findContainingFunctionParameterSource(identifier, sinkIndex, fileContent);
+  const doesDeclarationShadowParameter =
     declaration !== null &&
-    isHtmlTainted(declaration.initializer, fileContent, sinkIndex, visitedIdentifiers)
-  ) {
-    return true;
+    (parameterSource === null ||
+      declaration.declarationIndex > parameterSource.declarationNameIndex);
+  if (doesDeclarationShadowParameter) {
+    if (
+      isExplicitlyTrustedHtmlValue(
+        declaration.initializer,
+        fileContent,
+        declaration.initializerStartIndex,
+      )
+    ) {
+      return false;
+    }
+    return (
+      isHtmlTainted(
+        declaration.initializer,
+        fileContent,
+        declaration.initializerStartIndex,
+        visitedIdentifiers,
+        visitedCallSites,
+      ) || HTML_TAINT_PATTERN.test(trimmedExpression)
+    );
+  }
+  if (parameterSource !== null && parameterSource.functionName.length > 0) {
+    const callPattern = new RegExp(`\\b${escapeRegExp(parameterSource.functionName)}\\s*\\(`, "g");
+    let didInspectCallArgument = false;
+    let didInspectOnlyExplicitlyTrustedArguments = true;
+    for (const callMatch of fileContent.matchAll(callPattern)) {
+      if (
+        callMatch.index === parameterSource.declarationNameIndex ||
+        visitedCallSites.has(callMatch.index)
+      ) {
+        continue;
+      }
+      const openingParenthesisIndex = callMatch.index + callMatch[0].lastIndexOf("(");
+      const closingParenthesisIndex = findMatchingBracket(fileContent, openingParenthesisIndex);
+      if (closingParenthesisIndex < 0) continue;
+      const argument = splitTopLevelArguments(
+        fileContent.slice(openingParenthesisIndex + 1, closingParenthesisIndex),
+      )[parameterSource.parameterIndex];
+      if (argument === undefined) continue;
+      const isCallInsideFunctionBody =
+        callMatch.index >= parameterSource.declarationNameIndex &&
+        callMatch.index <= parameterSource.bodyEndIndex;
+      if (
+        isCallInsideFunctionBody &&
+        doesExpressionAliasIdentifier(argument, identifier, callMatch.index, fileContent)
+      ) {
+        continue;
+      }
+      didInspectCallArgument = true;
+      didInspectOnlyExplicitlyTrustedArguments &&= isExplicitlyTrustedHtmlValue(
+        argument,
+        fileContent,
+        callMatch.index,
+      );
+      const callVisitedIdentifiers = new Set(visitedIdentifiers);
+      callVisitedIdentifiers.delete(identifier);
+      const nextVisitedCallSites = new Set(visitedCallSites);
+      nextVisitedCallSites.add(callMatch.index);
+      if (
+        isHtmlTainted(
+          argument,
+          fileContent,
+          callMatch.index,
+          callVisitedIdentifiers,
+          nextVisitedCallSites,
+        )
+      ) {
+        return true;
+      }
+    }
+    if (didInspectCallArgument) {
+      return (
+        !didInspectOnlyExplicitlyTrustedArguments && HTML_TAINT_PATTERN.test(trimmedExpression)
+      );
+    }
+    return HTML_TAINT_PATTERN.test(trimmedExpression);
   }
 
-  const parameterSource = findContainingFunctionParameterSource(identifier, sinkIndex, fileContent);
-  if (parameterSource === null || parameterSource.functionName.length === 0) return false;
-  const callPattern = new RegExp(
-    `\\b${escapeRegExp(parameterSource.functionName)}\\s*\\(([^)]*)\\)`,
-    "g",
-  );
-  for (const callMatch of fileContent.matchAll(callPattern)) {
-    const argument = splitTopLevelArguments(callMatch[1] ?? "")[parameterSource.parameterIndex];
-    if (
-      argument !== undefined &&
-      isHtmlTainted(argument, fileContent, sinkIndex, new Set(visitedIdentifiers))
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return HTML_TAINT_PATTERN.test(trimmedExpression);
 };
 
 export const dangerousHtmlSink = defineRule({
@@ -604,7 +767,8 @@ export const dangerousHtmlSink = defineRule({
       if (
         templateInterpolations === null &&
         valueIdentifier !== undefined &&
-        BARE_IDENTIFIER_VALUE_PATTERN.test(valueExpression)
+        BARE_IDENTIFIER_VALUE_PATTERN.test(valueExpression) &&
+        findContainingFunctionParameterSource(valueIdentifier, sinkIndex, file.content) === null
       ) {
         const declarationInitializer = getIdentifierDeclarationInitializer(
           valueIdentifier,
@@ -619,37 +783,63 @@ export const dangerousHtmlSink = defineRule({
 
       if (templateInterpolations === "") continue;
       const judgedExpression = templateInterpolations ?? valueExpression;
+      const doesJudgedExpressionCombineValues =
+        splitTopLevelByPlus(judgedExpression).length > 1 ||
+        (templateInterpolations?.match(/\$\{/g)?.length ?? 0) > 1;
 
-      if (SANITIZER_PATTERN.test(judgedExpression)) continue;
-      if (ENV_CONFIG_VALUE_PATTERN.test(judgedExpression)) continue;
-      if (I18N_VALUE_PATTERN.test(judgedExpression)) continue;
-      if (!isHtmlTainted(judgedExpression, file.content, sinkIndex, new Set())) continue;
+      if (!doesJudgedExpressionCombineValues && SANITIZER_PATTERN.test(judgedExpression)) continue;
+      if (!doesJudgedExpressionCombineValues && ENV_CONFIG_VALUE_PATTERN.test(judgedExpression)) {
+        continue;
+      }
+      if (!doesJudgedExpressionCombineValues && I18N_VALUE_PATTERN.test(judgedExpression)) continue;
+      if (!isHtmlTainted(judgedExpression, file.content, sinkIndex, new Set(), new Set())) continue;
       if (ESCAPING_SERIALIZER_CALL_PATTERN.test(valueExpression)) continue;
       // Highlighter output: a `highlighted*` value is escaped, token-wrapped
       // markup by naming convention (often passed as a prop or routed through
       // React state, so no direct serializer assignment is visible); a present-
       // tense `highlight*` value is trusted only when the file uses a highlighter
       // library. (`highlight*()` calls are handled by the serializer-call check.)
-      if (/highlighted/i.test(valueExpression)) continue;
-      if (/highlight/i.test(valueExpression) && HIGHLIGHTER_LIBRARY_PATTERN.test(file.content)) {
-        continue;
-      }
+      if (isTrustedHighlighterValue(valueExpression, file.content, sinkIndex)) continue;
       // Value is a bare identifier, member/index access, or identifier with a
       // literal fallback: exempt only when that identifier is assigned from a
       // serializer or a sanitizer in the file. `[:=]` accepts property-style
       // provenance too (`{ html: hl.codeToHtml(code) }` routed through state).
       if (valueIdentifier !== undefined) {
         const escapedIdentifier = escapeRegExp(valueIdentifier);
-        const fromSerializer = new RegExp(
-          `\\b${escapedIdentifier}\\b\\s*${SERIALIZER_ASSIGNMENT_PATTERN.source}`,
-          "i",
+        const visibleDeclaration = findVisibleIdentifierDeclaration(
+          valueIdentifier,
+          sinkIndex,
+          file.content,
         );
-        if (fromSerializer.test(file.content)) continue;
-        const fromSanitizer = new RegExp(
-          `\\b${escapedIdentifier}\\b\\s*${SANITIZED_ASSIGNMENT_PATTERN.source}`,
-          "i",
-        );
-        if (fromSanitizer.test(file.content)) continue;
+        const visibleInitializer = visibleDeclaration?.initializer;
+        const isCompoundInitializer =
+          visibleInitializer !== undefined &&
+          (splitTopLevelByPlus(visibleInitializer).length > 1 ||
+            (visibleInitializer.match(/\$\{/g)?.length ?? 0) > 1);
+        if (!isCompoundInitializer) {
+          const fromSerializer = new RegExp(
+            `\\b${escapedIdentifier}\\b\\s*${SERIALIZER_ASSIGNMENT_PATTERN.source}`,
+            "i",
+          );
+          if (
+            visibleInitializer === undefined
+              ? fromSerializer.test(file.content)
+              : SERIALIZER_CALL_PROVENANCE_PATTERN.test(visibleInitializer)
+          ) {
+            continue;
+          }
+          const fromSanitizer = new RegExp(
+            `\\b${escapedIdentifier}\\b\\s*${SANITIZED_ASSIGNMENT_PATTERN.source}`,
+            "i",
+          );
+          if (
+            visibleInitializer === undefined
+              ? fromSanitizer.test(file.content)
+              : SANITIZED_ASSIGNMENT_PATTERN.test(`=${visibleInitializer}`)
+          ) {
+            continue;
+          }
+        }
         const fromDomContent = new RegExp(
           `\\b${escapedIdentifier}\\b\\s*${DOM_CONTENT_ASSIGNMENT_PATTERN.source}`,
         );
