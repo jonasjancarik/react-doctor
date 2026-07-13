@@ -42,6 +42,7 @@ import type { EsTreeNodeOfType } from "../../utils/es-tree-node-of-type.js";
 // treat subscriptions as store-like).
 const OBSERVER_REGISTRATION_METHOD_NAME = "observe";
 const CLEANUP_EFFECT_HOOK_NAMES = new Set([...EFFECT_HOOK_NAMES, "useInsertionEffect"]);
+const REPLAYABLE_ITERATOR_COLLECTION_CACHE = new WeakMap<RuleContext, Map<number, string | null>>();
 
 interface SubscribeLikeUsage {
   kind: "subscribe" | "timer" | "socket";
@@ -413,13 +414,198 @@ const removeSynchronouslyReleasedUsages = (
   });
 };
 
+const findForOfStatementForIteratorExpression = (
+  expression: EsTreeNode | null | undefined,
+  context: RuleContext,
+): EsTreeNodeOfType<"ForOfStatement"> | null => {
+  if (!expression) return null;
+  const unwrappedExpression = stripParenExpression(expression);
+  if (!isNodeOfType(unwrappedExpression, "Identifier")) return null;
+  const symbol = context.scopes.symbolFor(unwrappedExpression);
+  const bindingDeclarator = symbol?.bindingIdentifier.parent;
+  const bindingDeclaration = bindingDeclarator?.parent;
+  const forOfStatement = bindingDeclaration?.parent;
+  const isStableIteratorBinding =
+    isNodeOfType(bindingDeclaration, "VariableDeclaration") &&
+    symbol?.references.every(
+      (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
+    );
+  return symbol &&
+    isNodeOfType(bindingDeclarator, "VariableDeclarator") &&
+    bindingDeclarator.id === symbol.bindingIdentifier &&
+    isStableIteratorBinding &&
+    bindingDeclaration.declarations.length === 1 &&
+    isNodeOfType(forOfStatement, "ForOfStatement") &&
+    forOfStatement.left === bindingDeclaration &&
+    forOfStatement.await !== true
+    ? forOfStatement
+    : null;
+};
+
+const isAssignmentFormForOfIteratorReference = (
+  expression: EsTreeNode | null | undefined,
+  context: RuleContext,
+): boolean => {
+  if (!expression) return false;
+  const unwrappedExpression = stripParenExpression(expression);
+  const referencedSymbolIds = new Set<number>();
+  walkAst(unwrappedExpression, (expressionChild: EsTreeNode) => {
+    if (!isNodeOfType(expressionChild, "Identifier")) return;
+    const symbol = context.scopes.symbolFor(expressionChild);
+    if (symbol) referencedSymbolIds.add(symbol.id);
+  });
+  if (referencedSymbolIds.size === 0) return false;
+  let currentNode = unwrappedExpression.parent;
+  while (currentNode && !isFunctionLike(currentNode)) {
+    if (isNodeOfType(currentNode, "ForOfStatement")) {
+      const loopTarget = stripParenExpression(currentNode.left);
+      if (!isNodeOfType(loopTarget, "VariableDeclaration")) {
+        let doesLoopAssignReferencedSymbol = false;
+        walkAst(loopTarget, (targetChild: EsTreeNode) => {
+          if (!isNodeOfType(targetChild, "Identifier")) return;
+          const targetSymbol = context.scopes.symbolFor(targetChild);
+          if (targetSymbol && referencedSymbolIds.has(targetSymbol.id)) {
+            doesLoopAssignReferencedSymbol = true;
+            return false;
+          }
+        });
+        if (doesLoopAssignReferencedSymbol) return true;
+        walkAst(currentNode.body, (bodyChild: EsTreeNode) => {
+          if (!isNodeOfType(bodyChild, "Identifier") || !isWithinAssignmentTarget(bodyChild)) {
+            return;
+          }
+          const bodySymbol = context.scopes.symbolFor(bodyChild);
+          if (bodySymbol && referencedSymbolIds.has(bodySymbol.id)) {
+            doesLoopAssignReferencedSymbol = true;
+            return false;
+          }
+        });
+        if (doesLoopAssignReferencedSymbol) return true;
+      }
+    }
+    currentNode = currentNode.parent;
+  }
+  return false;
+};
+
+const isPrivatePlainConstIdentifier = (identifier: EsTreeNode, context: RuleContext): boolean => {
+  if (!isNodeOfType(identifier, "Identifier")) return false;
+  const symbol = context.scopes.symbolFor(identifier);
+  if (
+    !symbol ||
+    symbol.kind !== "const" ||
+    !isNodeOfType(symbol.declarationNode, "VariableDeclarator") ||
+    symbol.declarationNode.id !== symbol.bindingIdentifier
+  ) {
+    return false;
+  }
+  return (
+    !isNodeOfType(symbol.declarationNode.parent?.parent, "ExportNamedDeclaration") &&
+    !isNodeOfType(symbol.declarationNode.parent?.parent, "ExportDefaultDeclaration")
+  );
+};
+
+const hasOnlyReplayableCollectionReferences = (
+  identifier: EsTreeNode,
+  context: RuleContext,
+  visitedSymbolIds: Set<number>,
+): boolean => {
+  if (
+    !isNodeOfType(identifier, "Identifier") ||
+    !isPrivatePlainConstIdentifier(identifier, context)
+  ) {
+    return false;
+  }
+  const symbol = context.scopes.symbolFor(identifier);
+  if (!symbol) return false;
+  if (visitedSymbolIds.has(symbol.id)) return true;
+  visitedSymbolIds.add(symbol.id);
+  return symbol.references.every((reference) => {
+    const referenceRoot = findTransparentExpressionRoot(reference.identifier);
+    const parent = referenceRoot.parent;
+    if (isNodeOfType(parent, "ForOfStatement") && parent.right === referenceRoot) return true;
+    if (isNodeOfType(parent, "VariableDeclarator") && parent.init === referenceRoot) {
+      const declaration = parent.parent;
+      return isNodeOfType(parent.id, "Identifier") &&
+        isNodeOfType(declaration, "VariableDeclaration") &&
+        declaration.kind === "const"
+        ? hasOnlyReplayableCollectionReferences(parent.id, context, visitedSymbolIds)
+        : false;
+    }
+    return false;
+  });
+};
+
+const resolveReplayableIteratorCollectionKeyUncached = (
+  expression: EsTreeNode | null | undefined,
+  context: RuleContext,
+  visitedSymbolIds: Set<number> = new Set(),
+): string | null => {
+  if (!expression) return null;
+  const unwrappedExpression = stripParenExpression(expression);
+  if (
+    !isNodeOfType(unwrappedExpression, "Identifier") ||
+    !isPrivatePlainConstIdentifier(unwrappedExpression, context)
+  ) {
+    return null;
+  }
+  const symbol = context.scopes.symbolFor(unwrappedExpression);
+  if (!symbol || visitedSymbolIds.has(symbol.id)) return null;
+  visitedSymbolIds.add(symbol.id);
+  const initializer = symbol.initializer ? stripParenExpression(symbol.initializer) : null;
+  if (isNodeOfType(initializer, "ArrayExpression")) {
+    const hasOnlyPrimitiveElements = (initializer.elements ?? []).every(
+      (element) =>
+        element === null ||
+        (isNodeOfType(element, "Literal") &&
+          (element.value === null ||
+            typeof element.value === "boolean" ||
+            typeof element.value === "number" ||
+            typeof element.value === "string")),
+    );
+    return hasOnlyPrimitiveElements &&
+      hasOnlyReplayableCollectionReferences(symbol.bindingIdentifier, context, new Set())
+      ? `symbol:${symbol.id}`
+      : null;
+  }
+  if (!isNodeOfType(initializer, "Identifier")) return null;
+  return resolveReplayableIteratorCollectionKeyUncached(initializer, context, visitedSymbolIds);
+};
+
+const resolveReplayableIteratorCollectionKey = (
+  expression: EsTreeNode | null | undefined,
+  context: RuleContext,
+): string | null => {
+  if (!expression) return null;
+  const unwrappedExpression = stripParenExpression(expression);
+  if (!isNodeOfType(unwrappedExpression, "Identifier")) return null;
+  const symbol = context.scopes.symbolFor(unwrappedExpression);
+  if (!symbol) return null;
+  let contextCache = REPLAYABLE_ITERATOR_COLLECTION_CACHE.get(context);
+  if (!contextCache) {
+    contextCache = new Map();
+    REPLAYABLE_ITERATOR_COLLECTION_CACHE.set(context, contextCache);
+  }
+  if (contextCache.has(symbol.id)) return contextCache.get(symbol.id) ?? null;
+  const collectionKey = resolveReplayableIteratorCollectionKeyUncached(expression, context);
+  contextCache.set(symbol.id, collectionKey);
+  return collectionKey;
+};
+
 const resolveIteratorCollectionKey = (
   expression: EsTreeNode | null | undefined,
   context: RuleContext,
 ): string | null => {
-  if (!expression || !isNodeOfType(expression, "Identifier")) return null;
-  const symbol = context.scopes.symbolFor(expression);
-  if (!symbol || symbol.kind !== "parameter") return null;
+  if (!expression) return null;
+  const unwrappedExpression = stripParenExpression(expression);
+  if (!isNodeOfType(unwrappedExpression, "Identifier")) return null;
+  const forOfStatement = findForOfStatementForIteratorExpression(unwrappedExpression, context);
+  if (forOfStatement) {
+    return resolveReplayableIteratorCollectionKey(forOfStatement.right, context);
+  }
+  const symbol = context.scopes.symbolFor(unwrappedExpression);
+  if (!symbol) return null;
+  if (symbol.kind !== "parameter") return null;
   let callbackNode: EsTreeNode | null | undefined = symbol.bindingIdentifier.parent;
   while (callbackNode && !isFunctionLike(callbackNode)) callbackNode = callbackNode.parent;
   if (!callbackNode || !isFunctionLike(callbackNode)) return null;
@@ -444,6 +630,93 @@ const resolveIteratorCollectionKey = (
     }
   }
   return null;
+};
+
+const isStableLoopReceiver = (
+  expression: EsTreeNode | null | undefined,
+  context: RuleContext,
+): boolean => {
+  if (!expression) return false;
+  const unwrappedExpression = stripParenExpression(expression);
+  return (
+    isNodeOfType(unwrappedExpression, "Identifier") &&
+    unwrappedExpression.name === "document" &&
+    context.scopes.isGlobalReference(unwrappedExpression)
+  );
+};
+
+const resolveStableLoopHandlerSymbolId = (
+  expression: EsTreeNode | null | undefined,
+  context: RuleContext,
+): number | null => {
+  if (!expression) return null;
+  const unwrappedExpression = stripParenExpression(expression);
+  if (!isNodeOfType(unwrappedExpression, "Identifier")) return null;
+  const symbol = context.scopes.symbolFor(unwrappedExpression);
+  if (
+    !symbol ||
+    (symbol.kind !== "const" && symbol.kind !== "function" && symbol.kind !== "parameter") ||
+    !symbol.references.every(
+      (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
+    )
+  ) {
+    return null;
+  }
+  return symbol.id;
+};
+
+const resolveStaticEventListenerCapture = (
+  expression: EsTreeNode | null | undefined,
+): boolean | null => {
+  if (!expression) return false;
+  const unwrappedExpression = stripParenExpression(expression);
+  if (isNodeOfType(unwrappedExpression, "Literal")) {
+    return typeof unwrappedExpression.value === "boolean" ? unwrappedExpression.value : null;
+  }
+  if (!isNodeOfType(unwrappedExpression, "ObjectExpression")) return null;
+  let captureValue: boolean | null = false;
+  for (const property of unwrappedExpression.properties ?? []) {
+    if (isNodeOfType(property, "SpreadElement")) {
+      captureValue = null;
+      continue;
+    }
+    if (!isNodeOfType(property, "Property")) return null;
+    const propertyName = getStaticPropertyKeyName(property);
+    if (propertyName === null || (!property.computed && propertyName === "__proto__")) return null;
+    if (propertyName !== "capture") continue;
+    const value = stripParenExpression(property.value);
+    captureValue =
+      isNodeOfType(value, "Literal") && typeof value.value === "boolean" ? value.value : null;
+  }
+  return captureValue;
+};
+
+const isDirectExhaustiveForOfRelease = (
+  releaseNode: EsTreeNode,
+  forOfStatement: EsTreeNodeOfType<"ForOfStatement">,
+): boolean => {
+  const releaseRoot = findTransparentExpressionRoot(releaseNode);
+  const releaseStatement = releaseRoot.parent;
+  if (!isNodeOfType(releaseStatement, "ExpressionStatement")) return false;
+  const isDirectLoopBodyStatement = isNodeOfType(forOfStatement.body, "BlockStatement")
+    ? releaseStatement.parent === forOfStatement.body
+    : releaseStatement === forOfStatement.body;
+  if (!isDirectLoopBodyStatement) return false;
+  let hasAbruptLoopExit = false;
+  walkAst(forOfStatement.body, (child: EsTreeNode) => {
+    if (hasAbruptLoopExit) return false;
+    if (child !== forOfStatement.body && isFunctionLike(child)) return false;
+    if (
+      isNodeOfType(child, "BreakStatement") ||
+      isNodeOfType(child, "ContinueStatement") ||
+      isNodeOfType(child, "ReturnStatement") ||
+      isNodeOfType(child, "ThrowStatement")
+    ) {
+      hasAbruptLoopExit = true;
+      return false;
+    }
+  });
+  return !hasAbruptLoopExit;
 };
 
 const findCollectionMappingCall = (callbackNode: EsTreeNode): EsTreeNode | null => {
@@ -788,6 +1061,7 @@ const doesCleanupFunctionReleaseUsage = (
   if (!isFunctionLike(cleanupFunction) || visitedFunctions.has(cleanupFunction)) return false;
   visitedFunctions.add(cleanupFunction);
   let didCleanupFunctionMatch = false;
+  const matchingLoopOrHelperAnchors: EsTreeNode[] = [];
   walkAst(cleanupFunction.body, (cleanupChild: EsTreeNode) => {
     if (didCleanupFunctionMatch) return false;
     if (
@@ -798,8 +1072,28 @@ const doesCleanupFunctionReleaseUsage = (
       return false;
     }
     if (doesReleaseCallMatchUsage(cleanupChild, usage, context)) {
-      didCleanupFunctionMatch = true;
-      return false;
+      const cleanupCall = isNodeOfType(cleanupChild, "ChainExpression")
+        ? cleanupChild.expression
+        : cleanupChild;
+      const cleanupEventArgument = isNodeOfType(cleanupCall, "CallExpression")
+        ? cleanupCall.arguments?.[0]
+        : null;
+      const cleanupForOfStatement = findForOfStatementForIteratorExpression(
+        cleanupEventArgument,
+        context,
+      );
+      if (!cleanupForOfStatement) {
+        didCleanupFunctionMatch = true;
+        return false;
+      }
+      if (
+        !cleanupFunction.async &&
+        !cleanupFunction.generator &&
+        isDirectExhaustiveForOfRelease(cleanupChild, cleanupForOfStatement)
+      ) {
+        matchingLoopOrHelperAnchors.push(cleanupForOfStatement);
+      }
+      return;
     }
     const helperCall = isNodeOfType(cleanupChild, "ChainExpression")
       ? cleanupChild.expression
@@ -812,13 +1106,21 @@ const doesCleanupFunctionReleaseUsage = (
     if (
       helperFunction &&
       isFunctionLike(helperFunction) &&
-      doesCleanupFunctionReleaseUsage(helperFunction, usage, context, visitedFunctions)
+      doesCleanupFunctionReleaseUsage(helperFunction, usage, context, new Set(visitedFunctions)) &&
+      !helperFunction.async &&
+      !helperFunction.generator
     ) {
-      didCleanupFunctionMatch = true;
-      return false;
+      matchingLoopOrHelperAnchors.push(helperCall);
     }
   });
-  return didCleanupFunctionMatch;
+  return (
+    didCleanupFunctionMatch ||
+    doMatchingNodesCoverEveryPathFromFunctionEntry(
+      cleanupFunction,
+      matchingLoopOrHelperAnchors,
+      context,
+    )
+  );
 };
 
 const doesBoundCleanupReleaseUsage = (
@@ -883,6 +1185,7 @@ const callbackReturnsCleanupForUsage = (
   ) {
     return false;
   }
+  if (callback.async) return false;
   const doesReturnedValueReleaseUsage = (returnedValue: EsTreeNode): boolean => {
     if (doesBoundCleanupReleaseUsage(returnedValue, usage, context)) return true;
     const cleanupFunction = resolveStableValue(returnedValue, context);
@@ -1032,6 +1335,7 @@ const effectHasCleanupForUsage = (
   ) {
     return false;
   }
+  if (callback.async) return false;
   if (
     usage.kind === "subscribe" &&
     findEnclosingFunction(usage.node) === callback &&
@@ -1346,10 +1650,29 @@ const doesReleaseCallMatchUsage = (
   if (!pairedVerbNames || !matchesPairedReleaseVerb(releaseVerbName, pairedVerbNames)) return false;
 
   const releaseEventKey = resolveExpressionKey(callNode.arguments?.[0], context);
+  const usageEventArgument = isNodeOfType(usage.node, "CallExpression")
+    ? usage.node.arguments?.[0]
+    : null;
+  const releaseEventArgument = callNode.arguments?.[0];
+  const hasAssignmentFormLoopIterator =
+    isAssignmentFormForOfIteratorReference(usageEventArgument, context) ||
+    isAssignmentFormForOfIteratorReference(releaseEventArgument, context);
+  if (hasAssignmentFormLoopIterator) return false;
   if (usage.eventKey !== null && releaseEventKey !== null && usage.eventKey !== releaseEventKey) {
-    const usageIteratorCollectionKey = isNodeOfType(usage.node, "CallExpression")
-      ? resolveIteratorCollectionKey(usage.node.arguments?.[0], context)
-      : null;
+    if (!isNodeOfType(usage.node, "CallExpression")) return false;
+    const usageForOfStatement = findForOfStatementForIteratorExpression(
+      usageEventArgument,
+      context,
+    );
+    const releaseForOfStatement = findForOfStatementForIteratorExpression(
+      releaseEventArgument,
+      context,
+    );
+    if ((usageForOfStatement === null) !== (releaseForOfStatement === null)) return false;
+    const usageIteratorCollectionKey = resolveIteratorCollectionKey(
+      usage.node.arguments?.[0],
+      context,
+    );
     const releaseIteratorCollectionKey = resolveIteratorCollectionKey(
       callNode.arguments?.[0],
       context,
@@ -1359,6 +1682,41 @@ const doesReleaseCallMatchUsage = (
       usageIteratorCollectionKey !== releaseIteratorCollectionKey
     ) {
       return false;
+    }
+    if (usageForOfStatement) {
+      const registrationHandlerSymbolId = resolveStableLoopHandlerSymbolId(
+        usage.node.arguments?.[1],
+        context,
+      );
+      const releaseHandlerSymbolId = resolveStableLoopHandlerSymbolId(
+        callNode.arguments?.[1],
+        context,
+      );
+      if (
+        usage.registrationVerbName !== "addEventListener" ||
+        releaseVerbName !== "removeEventListener"
+      ) {
+        return false;
+      }
+      const registrationCallee = stripParenExpression(usage.node.callee);
+      if (!isNodeOfType(registrationCallee, "MemberExpression")) return false;
+      if (
+        !isStableLoopReceiver(registrationCallee.object, context) ||
+        !isStableLoopReceiver(callee.object, context) ||
+        registrationHandlerSymbolId === null ||
+        registrationHandlerSymbolId !== releaseHandlerSymbolId
+      ) {
+        return false;
+      }
+      const registrationCapture = resolveStaticEventListenerCapture(usage.node.arguments?.[2]);
+      const releaseCapture = resolveStaticEventListenerCapture(callNode.arguments?.[2]);
+      if (
+        registrationCapture === null ||
+        releaseCapture === null ||
+        registrationCapture !== releaseCapture
+      ) {
+        return false;
+      }
     }
   }
   if (releaseVerbName === "on") {
