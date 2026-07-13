@@ -76,7 +76,7 @@ import { shouldBlockCi } from "../utils/should-block-ci.js";
 import { shouldSkipPrompts } from "../utils/should-skip-prompts.js";
 import { warnDeprecatedFailOn } from "../utils/warn-deprecated-fail-on.js";
 import { warnIfAiTrainingEnvironment } from "../utils/warn-ai-training-environment.js";
-import { validateModeFlags } from "../utils/validate-mode-flags.js";
+import { validateIncludeUntrackedScope, validateModeFlags } from "../utils/validate-mode-flags.js";
 import { VERSION } from "../utils/version.js";
 
 interface CompletedScan {
@@ -442,6 +442,9 @@ export const inspectAction = async (directory: string, flags: InspectFlags): Pro
       ? buildChangedFilesDiffInfo(readChangedFilesFrom(path.resolve(flags.changedFilesFrom)))
       : null;
     const requestedScope = resolveScope(flags, userConfig);
+    // Untracked files only exist in a local working tree, so this is a
+    // CLI-only modifier (like `--staged`) — off unless the user opts in.
+    const includeUntracked = flags.includeUntracked ?? false;
     // The internal `--changed-files-from` path (the GitHub Action) implies the
     // `changed` scope when the user didn't pick one explicitly — it always ran
     // in diff mode historically.
@@ -449,6 +452,10 @@ export const inspectAction = async (directory: string, flags: InspectFlags): Pro
       requestedScope.scope === undefined && changedFilesDiffInfo !== null
         ? { ...requestedScope, scope: "changed" }
         : requestedScope;
+    // Validate against the EFFECTIVE scope (post `--changed-files-from`
+    // promotion), so a working-tree scope from a flag, `config.scope` /
+    // `config.diff`, or that internal path all satisfy the requirement.
+    validateIncludeUntrackedScope(includeUntracked, scopeRequest.scope);
     const wantsDiffMode = scopeRequest.scope !== undefined && scopeRequest.scope !== "full";
     // HACK: also call getDiffInfo when we MIGHT prompt the user — without it the
     // "full vs changed" prompt never appears for users on a feature branch who
@@ -458,7 +465,9 @@ export const inspectAction = async (directory: string, flags: InspectFlags): Pro
       (wantsDiffMode || (scopeRequest.scope === undefined && !skipPrompts && !isQuiet));
     const diffInfo =
       changedFilesDiffInfo ??
-      (shouldDetectDiff ? await getDiffInfo(resolvedDirectory, scopeRequest.base) : null);
+      (shouldDetectDiff
+        ? await getDiffInfo(resolvedDirectory, scopeRequest.base, includeUntracked)
+        : null);
     const scope = await finalizeScope({ requested: scopeRequest, diffInfo, skipPrompts, isQuiet });
     const isDiffMode = scope !== "full";
 
@@ -497,6 +506,7 @@ export const inspectAction = async (directory: string, flags: InspectFlags): Pro
             directory: resolvedDirectory,
             baseRef: linesBaseRef ?? undefined,
             files: [...diffInfo.changedFiles],
+            includeUntracked,
           })
         : null;
     if (scope === "lines" && changedLineRanges === null && !isQuiet) {
