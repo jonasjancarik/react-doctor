@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
+import { NON_FULL_ZOD_V4_MODULE_SOURCES } from "./__fixtures__/non-full-zod-v4-module-sources.js";
 import { zodV4NoDeprecatedSchemaApis } from "./zod-v4-no-deprecated-schema-apis.js";
 
 describe("zod-v4-no-deprecated-schema-apis", () => {
@@ -29,6 +30,42 @@ describe("zod-v4-no-deprecated-schema-apis", () => {
     const result = runRule(zodV4NoDeprecatedSchemaApis, code);
     expect(result.diagnostics).toHaveLength(1);
   });
+
+  it.each([
+    { importStatement: 'import { z } from "zod/v4";', factoryExpression: "z.object" },
+    { importStatement: 'import * as schema from "zod/v4";', factoryExpression: "schema.object" },
+    {
+      importStatement: 'import { z as schema } from "zod/v4";',
+      factoryExpression: "schema.object",
+    },
+    { importStatement: 'import schema from "zod/v4";', factoryExpression: "schema.object" },
+    {
+      importStatement: 'import { object as createObject } from "zod/v4";',
+      factoryExpression: "createObject",
+    },
+  ])(
+    "flags deprecated schemas from the official v4 export: $importStatement",
+    ({ importStatement, factoryExpression }) => {
+      const code = `
+        ${importStatement}
+        const strict = ${factoryExpression}({}).strict();
+      `;
+      const result = runRule(zodV4NoDeprecatedSchemaApis, code);
+      expect(result.diagnostics).toHaveLength(1);
+    },
+  );
+
+  it.each(NON_FULL_ZOD_V4_MODULE_SOURCES)(
+    "does NOT assign the full Zod v4 API to %s",
+    (moduleSource) => {
+      const code = `
+        import { z } from "${moduleSource}";
+        const strict = z.object({}).strict();
+      `;
+      const result = runRule(zodV4NoDeprecatedSchemaApis, code);
+      expect(result.diagnostics).toHaveLength(0);
+    },
+  );
 
   it("flags deprecated top-level factories and optional aliases", () => {
     const code = `
