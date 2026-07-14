@@ -44,6 +44,432 @@ describe("no-reset-all-state-on-prop-change — regressions", () => {
     expect(result.diagnostics[0]?.message).toContain("clears all state");
   });
 
+  describe("Boolean render gating", () => {
+    it("still reports when an overflow-menu dependency can change between truthy values", () => {
+      const result = runRule(
+        noResetAllStateOnPropChange,
+        `import { useEffect, useState } from "react";
+        const TopNavigation = ({ menuTriggerVisible }: { menuTriggerVisible?: number[] }) => {
+          const [overflowMenuOpen, setOverflowMenuOpen] = useState(false);
+          useEffect(() => {
+            setOverflowMenuOpen(false);
+          }, [menuTriggerVisible]);
+          const content = (isVirtual) => {
+            const showMenuTrigger = isVirtual || menuTriggerVisible;
+            return (
+              <section
+                aria-hidden={isVirtual ? true : undefined}
+                className={isVirtual ? "measurement-hidden" : undefined}
+              >
+                {showMenuTrigger && <button aria-expanded={overflowMenuOpen}>Menu</button>}
+              </section>
+            );
+          };
+          return (
+            <>
+              {content(true)}
+              {content(false)}
+              {menuTriggerVisible && overflowMenuOpen && <div role="menu">Drawer</div>}
+            </>
+          );
+        };`,
+        { forceJsx: true },
+      );
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(1);
+    });
+
+    it("stays silent when a dismissed tooltip resets while its item is not highlighted", () => {
+      const result = runRule(
+        noResetAllStateOnPropChange,
+        `import { useEffect, useState } from "react";
+        const Item = ({ highlighted, disabledReason }: { highlighted?: boolean; disabledReason: string }) => {
+          const [canShowTooltip, setCanShowTooltip] = useState(true);
+          useEffect(() => setCanShowTooltip(true), [highlighted]);
+          return (
+            <div>
+              {highlighted && canShowTooltip && (
+                <Tooltip content={disabledReason} onEscape={() => setCanShowTooltip(false)} />
+              )}
+            </div>
+          );
+        };`,
+        { forceJsx: true },
+      );
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toEqual([]);
+    });
+
+    it("still reports when the reset state has an exposed consumer outside the visibility gate", () => {
+      const result = runRule(
+        noResetAllStateOnPropChange,
+        `import { useEffect, useState } from "react";
+        const TopNavigation = ({ menuTriggerVisible }) => {
+          const [overflowMenuOpen, setOverflowMenuOpen] = useState(false);
+          useEffect(() => {
+            setOverflowMenuOpen(false);
+          }, [menuTriggerVisible]);
+          return (
+            <>
+              {menuTriggerVisible && overflowMenuOpen && <div role="menu">Drawer</div>}
+              <output>{String(overflowMenuOpen)}</output>
+            </>
+          );
+        };`,
+        { forceJsx: true },
+      );
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(1);
+    });
+
+    it.each([
+      [
+        "an immutable visibility alias",
+        `const visibleGate = visible;
+        return visibleGate && <div>{open}</div>;`,
+      ],
+      [
+        "an inline handler on a hidden trigger",
+        `return visible && <button onClick={() => notify(open)}>Menu</button>;`,
+      ],
+      ["a gated portal", `return visible && createPortal(<div>{open}</div>, document.body);`],
+      [
+        "TypeScript and parenthesis wrappers",
+        `return ((visible as boolean) && <div>{(open satisfies boolean)}</div>);`,
+      ],
+      ["a custom child directly gated by visibility", `return visible && <Child value={open} />;`],
+    ])("stays silent through %s", (_label, renderBody) => {
+      const result = runRule(
+        noResetAllStateOnPropChange,
+        `import { useEffect, useState } from "react";
+        import { createPortal } from "react-dom";
+        const Menu = ({ visible }: { visible: boolean }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => setOpen(false), [visible]);
+          ${renderBody}
+        };`,
+        { forceJsx: true },
+      );
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toEqual([]);
+    });
+
+    it("stays silent when every reset state is gated by the same visibility transition", () => {
+      const result = runRule(
+        noResetAllStateOnPropChange,
+        `import { useEffect, useState } from "react";
+        const Menu = ({ visible }: { visible: boolean }) => {
+          const [open, setOpen] = useState(false);
+          const [query, setQuery] = useState("");
+          useEffect(() => {
+            setOpen(false);
+            setQuery("");
+          }, [visible]);
+          return visible && <div data-open={open}>{query}</div>;
+        };`,
+        { forceJsx: true },
+      );
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toEqual([]);
+    });
+
+    it.each([
+      [
+        "a string dependency remains visible across value changes",
+        `import { useEffect, useState } from "react";
+        const Menu = ({ userId }: { userId: string }) => {
+          const [draft, setDraft] = useState("");
+          useEffect(() => setDraft(""), [userId]);
+          return userId && <output>{draft}</output>;
+        };`,
+      ],
+      [
+        "a nested same-name interface cannot change the dependency type",
+        `import { useEffect, useState } from "react";
+        interface Props { visible: string }
+        namespace Other { export interface Props { visible: boolean } }
+        const Menu = ({ visible }: Props) => {
+          const [draft, setDraft] = useState("");
+          useEffect(() => setDraft(""), [visible]);
+          return visible && <output>{draft}</output>;
+        };`,
+      ],
+      [
+        "a nested interface can shadow a top-level Boolean interface",
+        `import { useEffect, useState } from "react";
+        interface Props { visible: boolean }
+        const makeMenu = () => {
+          interface Props { visible: string }
+          const Menu = ({ visible }: Props) => {
+            const [draft, setDraft] = useState("");
+            useEffect(() => setDraft(""), [visible]);
+            return visible && <output>{draft}</output>;
+          };
+          return Menu;
+        };`,
+      ],
+      [
+        "a type parameter can shadow a top-level Boolean interface",
+        `import { useEffect, useState } from "react";
+        interface Props { visible: boolean }
+        const Menu = <Props extends { visible: string }>({ visible }: Props) => {
+          const [draft, setDraft] = useState("");
+          useEffect(() => setDraft(""), [visible]);
+          return visible && <output>{draft}</output>;
+        };`,
+      ],
+      [
+        "a local type alias can shadow a top-level Boolean interface",
+        `import { useEffect, useState } from "react";
+        interface Props { visible: boolean }
+        const makeMenu = () => {
+          type Props = { visible: string };
+          const Menu = ({ visible }: Props) => {
+            const [draft, setDraft] = useState("");
+            useEffect(() => setDraft(""), [visible]);
+            return visible && <output>{draft}</output>;
+          };
+          return Menu;
+        };`,
+      ],
+      [
+        "a custom component can ignore hidden",
+        `import { useEffect, useState } from "react";
+        const Panel = ({ value }: { hidden: boolean; value: boolean }) => <output>{value}</output>;
+        const Menu = ({ visible }: { visible: boolean }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => setOpen(false), [visible]);
+          return <Panel hidden={!visible} value={open} />;
+        };`,
+      ],
+      [
+        "a native hidden attribute does not prevent stale DOM state",
+        `import { useEffect, useState } from "react";
+        const Menu = ({ visible }: { visible: boolean }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => setOpen(false), [visible]);
+          return <button hidden={!visible} aria-expanded={open}>Menu</button>;
+        };`,
+      ],
+      [
+        "aria-hidden does not prevent stale visual state",
+        `import { useEffect, useState } from "react";
+        const Menu = ({ visible }: { visible: boolean }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => setOpen(false), [visible]);
+          return <div aria-hidden={!visible} aria-expanded={open} />;
+        };`,
+      ],
+      [
+        "a custom component can ignore aria-hidden",
+        `import { useEffect, useState } from "react";
+        const Panel = (props: { "aria-hidden": boolean; "aria-expanded": boolean }) => <button aria-expanded={props["aria-expanded"]}>Menu</button>;
+        const Menu = ({ visible }: { visible: boolean }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => setOpen(false), [visible]);
+          return <Panel aria-hidden={!visible} aria-expanded={open} />;
+        };`,
+      ],
+      [
+        "a portal escapes a hidden DOM ancestor",
+        `import { useEffect, useState } from "react";
+        import { createPortal } from "react-dom";
+        const Menu = ({ visible }: { visible: boolean }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => setOpen(false), [visible]);
+          return <div hidden={!visible}>{createPortal(<output>{open}</output>, document.body)}</div>;
+        };`,
+      ],
+      [
+        "an aliased portal import escapes a hidden DOM ancestor",
+        `import { useEffect, useState } from "react";
+        import { createPortal as mountPortal } from "react-dom";
+        const Menu = ({ visible }: { visible: boolean }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => setOpen(false), [visible]);
+          return <div hidden={!visible}>{mountPortal(<output>{open}</output>, document.body)}</div>;
+        };`,
+      ],
+      [
+        "a const-aliased portal escapes a hidden DOM ancestor",
+        `import { useEffect, useState } from "react";
+        import { createPortal } from "react-dom";
+        const mountPortal = createPortal;
+        const Menu = ({ visible }: { visible: boolean }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => setOpen(false), [visible]);
+          return <div hidden={!visible}>{mountPortal(<output>{open}</output>, document.body)}</div>;
+        };`,
+      ],
+      [
+        "a custom child can portal through a hidden DOM ancestor",
+        `import { useEffect, useState } from "react";
+        import { createPortal } from "react-dom";
+        const Child = ({ value }: { value: boolean }) => createPortal(<output>{value}</output>, document.body);
+        const Menu = ({ visible }: { visible: boolean }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => setOpen(false), [visible]);
+          return <div hidden={!visible}><Child value={open} /><button onClick={() => setOpen(true)}>Open</button></div>;
+        };`,
+      ],
+      [
+        "an arbitrary class name has no hiding semantics",
+        `import { useEffect, useState } from "react";
+        const Menu = ({ visible }: { visible: boolean }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => setOpen(false), [visible]);
+          return <output className={!visible ? "not-hidden" : ""}>{open}</output>;
+        };`,
+      ],
+      [
+        "an opaque callback can dirty state while hidden",
+        `import { useEffect, useState } from "react";
+        const Menu = ({ visible, onRegister }: { visible: boolean; onRegister: (callback: () => void) => void }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => setOpen(false), [visible]);
+          useEffect(() => onRegister(() => setOpen(true)), [onRegister]);
+          return visible && <output>{open}</output>;
+        };`,
+      ],
+      [
+        "the reset effect also exposes its setter",
+        `import { useEffect, useState } from "react";
+        const Menu = ({ visible, onRegister }: { visible: boolean; onRegister: (setter: (value: boolean) => void) => void }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => {
+            setOpen(false);
+            onRegister(setOpen);
+          }, [visible]);
+          return visible && <output>{open}</output>;
+        };`,
+      ],
+      [
+        "the reset is observable from another effect",
+        `import { useEffect, useState } from "react";
+        const Menu = ({ visible }: { visible: boolean }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => setOpen(false), [visible]);
+          useEffect(() => notify(open), [open]);
+          return visible && <button onClick={() => setOpen(true)}>{String(open)}</button>;
+        };`,
+      ],
+    ])("still reports when %s", (_label, source) => {
+      const result = runRule(noResetAllStateOnPropChange, source, { forceJsx: true });
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(1);
+    });
+
+    it.each([
+      [
+        "the dependency is a negated visibility alias",
+        `const hidden = !visible;
+        useEffect(() => setOpen(false), [hidden]);
+        return !hidden && <button onClick={() => setOpen(true)}>{String(open)}</button>;`,
+      ],
+      [
+        "the state read is inside a gated map callback",
+        `useEffect(() => setOpen(false), [visible]);
+        return visible && items.map(item => (
+          <button key={item} onClick={() => setOpen(true)}>{String(open)}</button>
+        ));`,
+      ],
+      [
+        "the visibility gate uses a strict Boolean comparison",
+        `useEffect(() => setOpen(false), [visible]);
+        return visible === true ? (
+          <button onClick={() => setOpen(true)}>{String(open)}</button>
+        ) : null;`,
+      ],
+      [
+        "the state read is inside a singly invoked render helper",
+        `useEffect(() => setOpen(false), [visible]);
+        const renderContent = () => (
+          <button onClick={() => setOpen(true)}>{String(open)}</button>
+        );
+        return visible && renderContent();`,
+      ],
+      [
+        "a portal is directly gated before it escapes the tree",
+        `useEffect(() => setOpen(false), [visible]);
+        return visible && createPortal(<output>{open}</output>, document.body);`,
+      ],
+    ])("stays silent when %s", (_label, componentBody) => {
+      const result = runRule(
+        noResetAllStateOnPropChange,
+        `import { useEffect, useState } from "react";
+        import { createPortal } from "react-dom";
+        const Menu = ({ visible, items }: { visible: boolean; items: string[] }) => {
+          const [open, setOpen] = useState(false);
+          ${componentBody}
+        };`,
+        { forceJsx: true },
+      );
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toEqual([]);
+    });
+
+    it.each([
+      ["an inverse guard", `return !visible && <div>{open}</div>;`, "[visible]"],
+      ["a second reset dependency", `return visible && <div>{open}</div>;`, "[visible, userId]"],
+      [
+        "a mutable guard alias",
+        `let gate = visible;
+        gate = Boolean(visible);
+        return gate && <div>{open}</div>;`,
+        "[visible]",
+      ],
+      [
+        "a named event handler with opaque reachability",
+        `const handleClick = () => notify(open);
+        return visible && <button onClick={handleClick}>Menu</button>;`,
+        "[visible]",
+      ],
+      [
+        "an unguarded portal",
+        `return createPortal(<div>{open}</div>, document.body);`,
+        "[visible]",
+      ],
+      [
+        "visually exposed aria-hidden content",
+        `return <div aria-hidden={!visible}>{String(open)}</div>;`,
+        "[visible]",
+      ],
+    ])("still reports through %s", (_label, renderBody, dependencies) => {
+      const result = runRule(
+        noResetAllStateOnPropChange,
+        `import { useEffect, useState } from "react";
+        import { createPortal } from "react-dom";
+        const Menu = ({ visible, userId }) => {
+          const [open, setOpen] = useState(false);
+          useEffect(() => setOpen(false), ${dependencies});
+          ${renderBody}
+        };`,
+        { forceJsx: true },
+      );
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(1);
+    });
+
+    it("still reports when one of multiple reset states remains exposed", () => {
+      const result = runRule(
+        noResetAllStateOnPropChange,
+        `import { useEffect, useState } from "react";
+        const Menu = ({ visible }) => {
+          const [open, setOpen] = useState(false);
+          const [query, setQuery] = useState("");
+          useEffect(() => {
+            setOpen(false);
+            setQuery("");
+          }, [visible]);
+          return <><output>{query}</output>{visible && open && <div>Menu</div>}</>;
+        };`,
+        { forceJsx: true },
+      );
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(1);
+    });
+  });
+
   describe("live prop normalizations", () => {
     it("stays silent when a transition tracker records the current Boolean-normalized prop", () => {
       const result = runRule(
