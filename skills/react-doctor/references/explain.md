@@ -17,7 +17,7 @@ Triggers: "why did this rule fire", "I disagree with this rule", "turn this rule
 2. Explain it before changing anything:
 
 ```bash
-npx --yes react-doctor@0.7.8 --no-telemetry rules explain react-doctor/no-array-index-as-key
+npx --yes react-doctor@0.7.7 --no-telemetry rules explain react-doctor/no-array-index-as-key
 ```
 
 3. Pick the narrowest control that matches the user's intent (see decision guide).
@@ -25,22 +25,22 @@ npx --yes react-doctor@0.7.8 --no-telemetry rules explain react-doctor/no-array-
 5. Validate the change did what they wanted:
 
 ```bash
-npx --yes react-doctor@0.7.8 --no-telemetry --verbose --diff
+npx --yes react-doctor@0.7.7 --no-telemetry --verbose --diff
 ```
 
 ## Commands
 
 ```bash
-npx --yes react-doctor@0.7.8 --no-telemetry rules list                         # every rule + its effective severity
-npx --yes react-doctor@0.7.8 --no-telemetry rules list --configured            # only what your config changed
-npx --yes react-doctor@0.7.8 --no-telemetry rules list --category Performance   # filter by category
-npx --yes react-doctor@0.7.8 --no-telemetry rules explain <rule>               # why it matters + how to configure
-npx --yes react-doctor@0.7.8 --no-telemetry rules disable <rule>               # rule never runs
-npx --yes react-doctor@0.7.8 --no-telemetry rules enable <rule>                # turn back on at its recommended severity
-npx --yes react-doctor@0.7.8 --no-telemetry rules set <rule> warn              # off | warn | error
-npx --yes react-doctor@0.7.8 --no-telemetry rules category "React Native" off   # whole category
-npx --yes react-doctor@0.7.8 --no-telemetry rules ignore-tag design            # skip a rule family (design, test-noise, …)
-npx --yes react-doctor@0.7.8 --no-telemetry rules unignore-tag design
+npx --yes react-doctor@0.7.7 --no-telemetry rules list                         # every rule + its effective severity
+npx --yes react-doctor@0.7.7 --no-telemetry rules list --configured            # only what your config changed
+npx --yes react-doctor@0.7.7 --no-telemetry rules list --category Performance   # filter by category
+npx --yes react-doctor@0.7.7 --no-telemetry rules explain <rule>               # why it matters + how to configure
+npx --yes react-doctor@0.7.7 --no-telemetry rules disable <rule>               # rule never runs
+npx --yes react-doctor@0.7.7 --no-telemetry rules enable <rule>                # turn back on at its recommended severity
+npx --yes react-doctor@0.7.7 --no-telemetry rules set <rule> warn              # off | warn | error
+npx --yes react-doctor@0.7.7 --no-telemetry rules category "React Native" off   # whole category
+npx --yes react-doctor@0.7.7 --no-telemetry rules ignore-tag design            # skip a rule family (design, test-noise, …)
+npx --yes react-doctor@0.7.7 --no-telemetry rules unignore-tag design
 ```
 
 Rule references accept the full key (`react-doctor/no-danger`), the bare id (`no-danger`), or a legacy key (`react/no-danger`).

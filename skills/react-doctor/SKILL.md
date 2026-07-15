@@ -14,20 +14,20 @@ Before running React Doctor:
 
 1. Prefer a repository-provided React Doctor script and use the repository's package manager.
 2. Otherwise, if the repository declares `react-doctor`, run its local binary through the repository's package manager.
-3. Otherwise, use the pinned fallback `npx --yes react-doctor@0.7.8 --no-telemetry`.
+3. Otherwise, use the pinned fallback `npx --yes react-doctor@0.7.7 --no-telemetry`.
 
 Never use `@latest`, and do not add React Doctor to a repository unless the user asks. Include `--no-telemetry` when invoking the CLI directly.
 <!-- personal-react-doctor-skill:end -->
 
 ## After making React code changes:
 
-Run the selected command with `--verbose --scope changed --no-telemetry` and check the score did not regress. If no local command is available, run `npx --yes react-doctor@0.7.8 --verbose --scope changed --no-telemetry`.
+Run the selected command with `--verbose --scope changed --no-telemetry` and check the score did not regress. If no local command is available, run `npx --yes react-doctor@0.7.7 --verbose --scope changed --no-telemetry`.
 
 If the score dropped, fix the regressions before committing.
 
 ## For general cleanup or code improvement:
 
-Run the selected command with `--verbose --no-telemetry` (the default `--scope full`) to scan the full codebase. If no local command is available, run `npx --yes react-doctor@0.7.8 --verbose --no-telemetry`. Fix issues by severity — errors first, then warnings.
+Run the selected command with `--verbose --no-telemetry` (the default `--scope full`) to scan the full codebase. If no local command is available, run `npx --yes react-doctor@0.7.7 --verbose --no-telemetry`. Fix issues by severity — errors first, then warnings.
 
 ## /doctor — full local triage workflow
 
@@ -50,7 +50,7 @@ When the user wants to understand a rule, disagrees with one, or wants to disabl
 ## Command
 
 ```bash
-npx --yes react-doctor@0.7.8 --no-telemetry --verbose --scope changed
+npx --yes react-doctor@0.7.7 --no-telemetry --verbose --scope changed
 ```
 
 | Flag              | Purpose                                                          |

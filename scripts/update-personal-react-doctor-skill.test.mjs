@@ -5,6 +5,7 @@ import {
   assertExactVersion,
   customizeExplain,
   customizeSkill,
+  selectEligibleVersion,
   validateCustomizedSkill,
 } from "./update-personal-react-doctor-skill.mjs";
 
@@ -62,6 +63,45 @@ test("rejects non-exact package versions", () => {
   for (const version of ["latest", "^0.7.8", "0.7", "0.7.8 || 1.0.0"]) {
     assert.throws(() => assertExactVersion(version), /exact react-doctor version/);
   }
+});
+
+test("selects the newest stable release that is at least 48 hours old", () => {
+  const now = new Date("2026-07-15T12:00:00.000Z");
+  const packument = {
+    versions: {
+      "0.7.5": {},
+      "0.7.6": {},
+      "0.7.7": {},
+      "0.7.8-beta.1": {},
+      "0.7.9": { deprecated: "broken" },
+    },
+    time: {
+      "0.7.5": "2026-07-10T12:00:00.000Z",
+      "0.7.6": "2026-07-13T12:00:00.000Z",
+      "0.7.7": "2026-07-13T12:00:00.001Z",
+      "0.7.8-beta.1": "2026-07-01T12:00:00.000Z",
+      "0.7.9": "2026-07-12T12:00:00.000Z",
+    },
+  };
+
+  assert.deepEqual(selectEligibleVersion(packument, now), {
+    version: "0.7.6",
+    publishedAt: "2026-07-13T12:00:00.000Z",
+  });
+});
+
+test("fails safely when no stable release has aged long enough", () => {
+  assert.throws(
+    () =>
+      selectEligibleVersion(
+        {
+          versions: { "1.0.0": {} },
+          time: { "1.0.0": "2026-07-15T11:00:00.000Z" },
+        },
+        new Date("2026-07-15T12:00:00.000Z"),
+      ),
+    /at least 48 hours old/,
+  );
 });
 
 test("stops for review when upstream command conventions change", () => {

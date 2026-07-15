@@ -1,6 +1,8 @@
 {
   "upstreamRepository": "millionco/react-doctor",
-  "upstreamCommit": "64ae10dce6700a9961fab9086f40ab7901940548",
+  "upstreamCommit": "5915a58231c3ba640d2d17e3c703511b8c9c2746",
   "cliPackage": "react-doctor",
-  "cliVersion": "0.7.8"
+  "cliVersion": "0.7.7",
+  "cliPublishedAt": "2026-07-13T11:23:22.617Z",
+  "minimumReleaseAgeHours": 48
 }

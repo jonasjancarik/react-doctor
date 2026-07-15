@@ -20,10 +20,12 @@ const METADATA_PATH = path.join(
 
 const UPSTREAM_REPOSITORY = "millionco/react-doctor";
 const UPSTREAM_API = `https://api.github.com/repos/${UPSTREAM_REPOSITORY}`;
-const REGISTRY_LATEST = "https://registry.npmjs.org/react-doctor/latest";
+const REGISTRY_PACKAGE = "https://registry.npmjs.org/react-doctor";
+const MINIMUM_RELEASE_AGE_HOURS = 48;
 const CUSTOM_SECTION_START = "<!-- personal-react-doctor-skill:start -->";
 const CUSTOM_SECTION_END = "<!-- personal-react-doctor-skill:end -->";
 const EXACT_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+const STABLE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
 const UPSTREAM_COMMAND_PATTERN = /npx(?:\s+(?:--yes|-y))?\s+react-doctor@latest/g;
 
 function assert(condition, message) {
@@ -35,6 +37,46 @@ export function assertExactVersion(version) {
     typeof version === "string" && EXACT_VERSION_PATTERN.test(version),
     `Expected an exact react-doctor version, received ${JSON.stringify(version)}`,
   );
+}
+
+export function selectEligibleVersion(
+  packument,
+  now = new Date(),
+  minimumAgeHours = MINIMUM_RELEASE_AGE_HOURS,
+) {
+  assert(
+    Number.isFinite(minimumAgeHours) && minimumAgeHours >= 0,
+    "Minimum release age must be a non-negative number of hours.",
+  );
+  assert(
+    packument && typeof packument === "object",
+    "npm returned an invalid package document.",
+  );
+  assert(
+    packument.versions && packument.time,
+    "npm package metadata is missing versions or publication times.",
+  );
+
+  const nowTimestamp = now.getTime();
+  assert(Number.isFinite(nowTimestamp), "The updater received an invalid current time.");
+  const cutoff = nowTimestamp - minimumAgeHours * 60 * 60 * 1000;
+  const eligible = Object.entries(packument.versions)
+    .filter(([version, manifest]) => {
+      if (!STABLE_VERSION_PATTERN.test(version) || manifest?.deprecated) return false;
+      const publishedAt = Date.parse(packument.time[version]);
+      return Number.isFinite(publishedAt) && publishedAt <= cutoff;
+    })
+    .map(([version]) => ({
+      version,
+      publishedAt: new Date(packument.time[version]).toISOString(),
+    }))
+    .sort((left, right) => Date.parse(right.publishedAt) - Date.parse(left.publishedAt));
+
+  assert(
+    eligible.length > 0,
+    `No stable, non-deprecated react-doctor release is at least ${minimumAgeHours} hours old.`,
+  );
+  return eligible[0];
 }
 
 function pinnedCommand(version) {
@@ -222,12 +264,13 @@ async function fetchText(url) {
 }
 
 async function fetchUpdateInputs() {
-  const [branch, registry] = await Promise.all([
+  const [branch, packument] = await Promise.all([
     fetchJson(`${UPSTREAM_API}/commits/main`),
-    fetchJson(REGISTRY_LATEST),
+    fetchJson(REGISTRY_PACKAGE),
   ]);
   const upstreamCommit = branch.sha;
-  const cliVersion = registry.version;
+  const selectedRelease = selectEligibleVersion(packument);
+  const cliVersion = selectedRelease.version;
   assert(
     /^[0-9a-f]{40}$/.test(upstreamCommit),
     "GitHub returned an invalid upstream commit SHA.",
@@ -239,7 +282,13 @@ async function fetchUpdateInputs() {
     fetchText(`${rawRoot}/skills/react-doctor/SKILL.md`),
     fetchText(`${rawRoot}/skills/react-doctor/references/explain.md`),
   ]);
-  return { upstreamCommit, cliVersion, skill, explain };
+  return {
+    upstreamCommit,
+    cliVersion,
+    cliPublishedAt: selectedRelease.publishedAt,
+    skill,
+    explain,
+  };
 }
 
 async function writeOutput(name, value) {
@@ -265,6 +314,8 @@ async function update() {
           upstreamCommit: inputs.upstreamCommit,
           cliPackage: "react-doctor",
           cliVersion: inputs.cliVersion,
+          cliPublishedAt: inputs.cliPublishedAt,
+          minimumReleaseAgeHours: MINIMUM_RELEASE_AGE_HOURS,
         },
         null,
         2,
@@ -274,6 +325,7 @@ async function update() {
   await Promise.all([
     writeOutput("upstream_commit", inputs.upstreamCommit),
     writeOutput("cli_version", inputs.cliVersion),
+    writeOutput("cli_published_at", inputs.cliPublishedAt),
   ]);
 
   console.log(
@@ -293,6 +345,14 @@ async function validateLocalFiles() {
     "Metadata has an invalid upstream commit SHA.",
   );
   validateCustomizedSkill(skill, explain, metadata.cliVersion);
+  assert(
+    metadata.minimumReleaseAgeHours === MINIMUM_RELEASE_AGE_HOURS,
+    `Metadata must require a ${MINIMUM_RELEASE_AGE_HOURS}-hour release age.`,
+  );
+  assert(
+    Number.isFinite(Date.parse(metadata.cliPublishedAt)),
+    "Metadata has an invalid CLI publication time.",
+  );
   console.log(
     `Validated personal React Doctor skill at react-doctor@${metadata.cliVersion}.`,
   );

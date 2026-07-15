@@ -48,6 +48,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           UPSTREAM_COMMIT: ${{ steps.update.outputs.upstream_commit }}
           CLI_VERSION: ${{ steps.update.outputs.cli_version }}
+          CLI_PUBLISHED_AT: ${{ steps.update.outputs.cli_published_at }}
         run: |
           branch="automation/react-doctor-skill-update"
           git config user.name "github-actions[bot]"
@@ -58,10 +59,11 @@ jobs:
           git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" || true
           git push --force-with-lease origin "HEAD:refs/heads/$branch"
 
-          body="$(printf '%s\n\n%s\n%s\n\n%s\n' \
+          body="$(printf '%s\n\n%s\n%s\n%s\n\n%s\n' \
             'Refreshes the personal React Doctor skill from immutable upstream and npm versions.' \
             "- Upstream commit: \`$UPSTREAM_COMMIT\`" \
             "- CLI version: \`react-doctor@$CLI_VERSION\`" \
+            "- CLI published: \`$CLI_PUBLISHED_AT\` (selected only after the 48-hour waiting period)" \
             'The generator tests, skill validation, and pinned CLI smoke test passed before this PR was opened.')"
 
           if gh pr view "$branch" --json url >/dev/null 2>&1; then
