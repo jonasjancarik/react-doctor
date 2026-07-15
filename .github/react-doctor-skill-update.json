@@ -1,0 +1,6 @@
+{
+  "upstreamRepository": "millionco/react-doctor",
+  "upstreamCommit": "64ae10dce6700a9961fab9086f40ab7901940548",
+  "cliPackage": "react-doctor",
+  "cliVersion": "0.7.8"
+}

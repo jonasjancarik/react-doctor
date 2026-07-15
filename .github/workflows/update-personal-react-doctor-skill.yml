@@ -1,0 +1,75 @@
+name: Update personal React Doctor skill
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    if: github.repository == 'jonasjancarik/react-doctor'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the fork
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+
+      - name: Generate the customized skill
+        id: update
+        run: node scripts/update-personal-react-doctor-skill.mjs
+
+      - name: Test and validate the generator
+        run: |
+          node --test scripts/update-personal-react-doctor-skill.test.mjs
+          node scripts/update-personal-react-doctor-skill.mjs --validate
+
+      - name: Smoke-test the newly pinned CLI
+        env:
+          CLI_VERSION: ${{ steps.update.outputs.cli_version }}
+        run: npx --yes "react-doctor@${CLI_VERSION}" --version
+
+      - name: Detect generated changes
+        id: changes
+        run: |
+          if git diff --quiet -- skills/react-doctor .github/react-doctor-skill-update.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or update the review pull request
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_COMMIT: ${{ steps.update.outputs.upstream_commit }}
+          CLI_VERSION: ${{ steps.update.outputs.cli_version }}
+        run: |
+          branch="automation/react-doctor-skill-update"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$branch"
+          git add skills/react-doctor .github/react-doctor-skill-update.json
+          git commit -m "chore(skill): update personal React Doctor skill"
+          git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" || true
+          git push --force-with-lease origin "HEAD:refs/heads/$branch"
+
+          body="$(printf '%s\n\n%s\n%s\n\n%s\n' \
+            'Refreshes the personal React Doctor skill from immutable upstream and npm versions.' \
+            "- Upstream commit: \`$UPSTREAM_COMMIT\`" \
+            "- CLI version: \`react-doctor@$CLI_VERSION\`" \
+            'The generator tests, skill validation, and pinned CLI smoke test passed before this PR was opened.')"
+
+          if gh pr view "$branch" --json url >/dev/null 2>&1; then
+            gh pr edit "$branch" --title "chore(skill): update personal React Doctor skill" --body "$body"
+          else
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "chore(skill): update personal React Doctor skill" \
+              --body "$body"
+          fi

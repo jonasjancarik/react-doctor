@@ -7,15 +7,17 @@ description: Use when finishing a feature, fixing a bug, before committing React
 
 Scans React codebases for security, performance, correctness, and architecture issues. Outputs a 0–100 health score.
 
+<!-- personal-react-doctor-skill:start -->
 ## Choose the command
 
 Before running React Doctor:
 
 1. Prefer a repository-provided React Doctor script and use the repository's package manager.
 2. Otherwise, if the repository declares `react-doctor`, run its local binary through the repository's package manager.
-3. Otherwise, use the pinned fallback `npx --yes react-doctor@0.7.8`.
+3. Otherwise, use the pinned fallback `npx --yes react-doctor@0.7.8 --no-telemetry`.
 
 Never use `@latest`, and do not add React Doctor to a repository unless the user asks. Include `--no-telemetry` when invoking the CLI directly.
+<!-- personal-react-doctor-skill:end -->
 
 ## After making React code changes:
 
@@ -48,7 +50,7 @@ When the user wants to understand a rule, disagrees with one, or wants to disabl
 ## Command
 
 ```bash
-npx --yes react-doctor@0.7.8 --verbose --scope changed --no-telemetry
+npx --yes react-doctor@0.7.8 --no-telemetry --verbose --scope changed
 ```
 
 | Flag              | Purpose                                                          |

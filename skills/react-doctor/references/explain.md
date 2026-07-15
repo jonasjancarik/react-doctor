@@ -4,7 +4,9 @@ Explain React Doctor rules and edit `doctor.config.*` safely. Use this when a us
 wants to understand a rule or change which rules run — not for fixing diagnostics
 (that is the main `react-doctor` skill / `/doctor`).
 
+<!-- personal-react-doctor-skill:start -->
 Use the command selected by the main skill. The examples below show the pinned fallback; never replace it with `@latest`.
+<!-- personal-react-doctor-skill:end -->
 
 Triggers: "why did this rule fire", "I disagree with this rule", "turn this rule off",
 "stop flagging X", "too noisy", "disable design rules".
@@ -23,7 +25,7 @@ npx --yes react-doctor@0.7.8 --no-telemetry rules explain react-doctor/no-array-
 5. Validate the change did what they wanted:
 
 ```bash
-npx --yes react-doctor@0.7.8 --verbose --diff --no-telemetry
+npx --yes react-doctor@0.7.8 --no-telemetry --verbose --diff
 ```
 
 ## Commands
