@@ -1,22 +1,31 @@
 ---
 name: react-doctor
 description: Use when finishing a feature, fixing a bug, before committing React code, or when the user types `/doctor`, asks to scan, triage, or clean up React diagnostics. Covers lint, accessibility, bundle size, architecture. Includes a regression check and a full local-triage workflow that fetches the canonical playbook.
-version: "1.2.0"
 ---
 
 # React Doctor
 
 Scans React codebases for security, performance, correctness, and architecture issues. Outputs a 0–100 health score.
 
+## Choose the command
+
+Before running React Doctor:
+
+1. Prefer a repository-provided React Doctor script and use the repository's package manager.
+2. Otherwise, if the repository declares `react-doctor`, run its local binary through the repository's package manager.
+3. Otherwise, use the pinned fallback `npx --yes react-doctor@0.7.8`.
+
+Never use `@latest`, and do not add React Doctor to a repository unless the user asks. Include `--no-telemetry` when invoking the CLI directly.
+
 ## After making React code changes:
 
-Run `npx react-doctor@latest --verbose --scope changed` and check the score did not regress.
+Run the selected command with `--verbose --scope changed --no-telemetry` and check the score did not regress. If no local command is available, run `npx --yes react-doctor@0.7.8 --verbose --scope changed --no-telemetry`.
 
 If the score dropped, fix the regressions before committing.
 
 ## For general cleanup or code improvement:
 
-Run `npx react-doctor@latest --verbose` (the default `--scope full`) to scan the full codebase. Fix issues by severity — errors first, then warnings.
+Run the selected command with `--verbose --no-telemetry` (the default `--scope full`) to scan the full codebase. If no local command is available, run `npx --yes react-doctor@0.7.8 --verbose --no-telemetry`. Fix issues by severity — errors first, then warnings.
 
 ## /doctor — full local triage workflow
 
@@ -34,12 +43,12 @@ Pair it with the matching per-rule prompts at `https://www.react.doctor/prompts/
 
 ## Configuring or explaining rules
 
-When the user wants to understand a rule, disagrees with one, or wants to disable / tune which rules run (not fix code), read [references/explain.md](references/explain.md) and follow it. Start with `npx react-doctor@latest rules explain <rule>`, then apply the narrowest control via `npx react-doctor@latest rules disable|set|category|ignore-tag …`, which edits your `doctor.config.*` (or `package.json#reactDoctor`).
+When the user wants to understand a rule, disagrees with one, or wants to disable / tune which rules run (not fix code), read [references/explain.md](references/explain.md) and follow it. Use the selected local command or pinned fallback for `rules explain <rule>`, then apply the narrowest control via `rules disable|set|category|ignore-tag …`, which edits your `doctor.config.*` (or `package.json#reactDoctor`).
 
 ## Command
 
 ```bash
-npx react-doctor@latest --verbose --scope changed
+npx --yes react-doctor@0.7.8 --verbose --scope changed --no-telemetry
 ```
 
 | Flag              | Purpose                                                          |
