@@ -48,6 +48,7 @@ export const EFFECT_SNIPPET_POOL = [
   `useEffect(() => { setState(value); }, [value]);`,
   `useEffect(() => { if (value) { handle(value); } }, [value]);`,
   `const CallbackRefChild = ({ onSelect }) => { const callbackRef = useRef(onSelect); callbackRef.current = onSelect; const childData = buildPhoneData(); useEffect(() => { callbackRef.current(childData); }, [childData]); return null; };`,
+  `const EffectRefreshedCallbackChild = ({ onSelect }) => { const callbackRef = useRef(onSelect); const childData = buildPhoneData(); useEffect(() => { callbackRef.current = onSelect; }, [onSelect]); useEffect(() => { callbackRef.current(childData); }, [childData]); return null; };`,
   `const { registerPage: fuzzRegisterPageProp } = props; const fuzzRegisterPropsRef = useRef({ registerPage: fuzzRegisterPageProp }); fuzzRegisterPropsRef.current = { registerPage: fuzzRegisterPageProp }; useEffect(() => { const { registerPage: fuzzRegisterPage } = fuzzRegisterPropsRef.current; fuzzRegisterPage(value); }, [value]);`,
   `useEffect(() => { const debounced = debounce(() => handle(value), 300); debounced(); return () => debounced.cancel(); }, [value]);`,
   `useEffect(() => { const unsubscribe = store.subscribe(handle); return unsubscribe; }, []);`,
